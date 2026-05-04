@@ -68,7 +68,7 @@ export function Detail({ envelopes, setEnvelopes, notify, sendEmail, emails }) {
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{s.name || `Signer ${i + 1}`}</div>
                   <div style={{ fontSize: 12, color: T.textSec }}>{s.email || "No email"} · {s.role}</div>
                   {isSigned && s.signedAt && <div style={{ fontSize: 11, color: T.success, marginTop: 2 }}>Signed {fd(s.signedAt)} at {ft(s.signedAt)}</div>}
-                  {(s.access_code || s.has_access_code) && (
+                  {(s.access_code_hash || s.has_access_code) && (
                     <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3 }}>
                       <Ic d={I.shield} size={10} color={T.accent} s />
                       <span style={{ fontSize: 10, color: T.textDim }}>Access code set</span>

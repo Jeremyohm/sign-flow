@@ -154,7 +154,7 @@ export default function App() {
         body: JSON.stringify({
           to: signer.email, toName: signer.name || "Signer",
           subject, signingUrl: url, envelopeName: envelope.name, type,
-          hasAccessCode: !!(signer.access_code || signer.accessCode),
+          hasAccessCode: !!(signer.access_code_hash || signer.has_access_code || signer.accessCode),
         }),
       });
       if (res.ok) {

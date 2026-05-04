@@ -65,6 +65,24 @@ export async function createSigners(envelopeId, signers) {
   }));
   const { data, error } = await supabase.from("signers").insert(rows).select();
   if (error) throw error;
+
+  // Hash access codes server-side via RPC if any signer has one
+  for (let i = 0; i < signers.length; i++) {
+    const code = signers[i].accessCode || signers[i].access_code;
+    if (code && data[i]) {
+      await setAccessCode(data[i].sign_token, code);
+    }
+  }
+
+  return data;
+}
+
+export async function setAccessCode(signToken, code) {
+  const { data, error } = await supabase.rpc("set_access_code", {
+    p_sign_token: signToken,
+    p_code: code,
+  });
+  if (error) throw error;
   return data;
 }
 
@@ -89,7 +107,7 @@ export async function deleteSignersByEnvelope(envelopeId) {
 export async function createFields(envelopeId, fields) {
   const rows = fields.map(f => ({
     envelope_id: envelopeId,
-    signer_index: f.signer ?? 0,
+    signer_id: f.signer_id,
     type: f.type,
     page: f.page,
     x: f.x,
@@ -206,12 +224,64 @@ export async function getEnvelopeForSigning(signToken) {
 }
 
 export async function verifyAccessCode(signToken, code) {
-  const { data, error } = await supabase.rpc("verify_access_code", {
-    p_sign_token: signToken,
-    p_code: code,
+  const res = await fetch("/api/sign-verify-access-code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sign_token: signToken, code }),
   });
-  if (error) throw error;
-  return data;
+  if (!res.ok) throw new Error("Access code verification failed");
+  return await res.json();
+}
+
+// ── Signing endpoints (routed through server for IP/UA capture) ──
+
+export async function submitSignedFields(signToken, fieldValues) {
+  const res = await fetch("/api/sign-submit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sign_token: signToken, field_values: fieldValues }),
+  });
+  if (!res.ok) throw new Error("Signing submission failed");
+  return await res.json();
+}
+
+export async function declineEnvelope(signToken, reason) {
+  const res = await fetch("/api/sign-decline", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sign_token: signToken, reason: reason || "No reason provided" }),
+  });
+  if (!res.ok) throw new Error("Decline failed");
+  return await res.json();
+}
+
+export async function recordSignerView(signToken) {
+  fetch("/api/sign-record-view", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sign_token: signToken }),
+  }).catch(err => console.error("Failed to record view", err));
+}
+
+export async function recordConsent(signToken, disclosureVersion) {
+  const res = await fetch("/api/sign-record-consent", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sign_token: signToken, disclosure_version: disclosureVersion }),
+  });
+  if (!res.ok) throw new Error("Consent recording failed");
+  return await res.json();
+}
+
+export async function getSignedPdfUrlForSigning(signToken) {
+  const res = await fetch("/api/sign-pdf-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sign_token: signToken }),
+  });
+  if (!res.ok) throw new Error("Failed to get PDF URL");
+  const { url } = await res.json();
+  return url;
 }
 
 // ── PDF Storage ──

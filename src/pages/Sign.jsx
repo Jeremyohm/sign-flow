@@ -32,6 +32,8 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
   const [error, setError] = useState(null);
 
   // Access code gate state
+  const [consentRecorded, setConsentRecorded] = useState(false);
+
   const [needsAccessCode, setNeedsAccessCode] = useState(false);
   const [accessVerified, setAccessVerified] = useState(false);
   const [accessCodeInput, setAccessCodeInput] = useState("");
@@ -53,8 +55,11 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
           const pi = (result.signers || []).findIndex(s => s.status === "pending");
           setPendingSigner(ps || null);
           setPendingIdx(pi >= 0 ? pi : 0);
-          setMyFields((result.fields || []).filter(f => f.signer_index === pi));
+          setMyFields((result.fields || []).filter(f => f.signer_id === ps?.id));
           if (ps) setSName(ps.name || "");
+
+          // Record signer view (fire-and-forget audit event)
+          db.recordSignerView(id);
 
           // Check if this signer needs an access code
           if (result.signer?.has_access_code) {
@@ -75,7 +80,7 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
             const pi = (local.signers || []).findIndex(s => s.status === "pending");
             setPendingSigner(ps || null);
             setPendingIdx(pi >= 0 ? pi : 0);
-            setMyFields((local.fields || []).filter(f => (f.signer_index ?? f.signer) === pi));
+            setMyFields((local.fields || []).filter(f => f.signer_id === ps?.id));
             if (ps) setSName(ps.name || "");
           } else {
             setError("Document not found or link is invalid.");
@@ -112,7 +117,13 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
       // Load PDF from Supabase Storage and render with pdf.js
       (async () => {
         try {
-          const url = await db.getSignedPdfUrl(env.pdf_url);
+          // Use server-side signed URL endpoint for public signers, fall back to direct for owners
+          let url;
+          try {
+            url = await db.getSignedPdfUrlForSigning(id);
+          } catch {
+            url = await db.getSignedPdfUrl(env.pdf_url);
+          }
           const waitForPdfJs = () => new Promise((resolve) => {
             if (window.pdfjsLib) return resolve();
             const check = setInterval(() => { if (window.pdfjsLib) { clearInterval(check); resolve(); } }, 100);
@@ -197,45 +208,31 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
     if (!agreed || !sName.trim() || !allFieldsFilled) return;
 
     try {
-      // Update field values in DB
-      for (const [fieldId, value] of Object.entries(fieldValues)) {
-        await db.updateField(fieldId, { value });
-      }
-
-      // Update signer status
-      if (pendingSigner) {
-        await db.updateSigner(pendingSigner.id, {
-          status: "signed",
-          signed_at: new Date().toISOString(),
-          name: sName,
-        });
-      }
-
-      // Check if all signers are done and update envelope
-      const updatedSigners = signers.map(s =>
-        s.id === pendingSigner?.id
-          ? { ...s, status: "signed", signed_at: new Date().toISOString(), name: sName }
-          : s
+      // Submit all field values and mark signer as signed via server-side RPC
+      const result = await db.submitSignedFields(
+        id, // sign_token from URL
+        Object.entries(fieldValues).map(([field_id, value]) => ({ field_id, value }))
       );
-      const allSigned = updatedSigners.every(s => s.status === "signed");
-      if (allSigned) {
-        await db.updateEnvelope(env.id, { status: "completed" });
-      } else {
-        await db.updateEnvelope(env.id, { status: "in_progress" });
-        const next = updatedSigners.find(s => s.status === "waiting");
-        if (next) {
-          await db.updateSigner(next.id, { status: "pending" });
+
+      if (result?.error) {
+        if (result.error === "consent_required") {
+          if (notify) notify("Please agree to use electronic signatures before signing.", "warning");
+        } else {
+          if (notify) notify(`Signing failed: ${result.error}`, "warning");
         }
+        return;
       }
 
       // Update local state if available
       if (setEnvelopes) {
+        const updatedSigners = signers.map(s =>
+          s.id === pendingSigner?.id
+            ? { ...s, status: "signed", signed_at: new Date().toISOString(), name: sName }
+            : s
+        );
         setEnvelopes(prev => prev.map(e => {
           if (e.id !== env.id) return e;
-          const u = { ...e, updatedAt: new Date().toISOString() };
-          u.signers = updatedSigners;
-          u.status = allSigned ? "completed" : "in_progress";
-          return u;
+          return { ...e, updatedAt: new Date().toISOString(), signers: updatedSigners, status: result.envelope_status };
         }));
       }
 
@@ -244,6 +241,21 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
     } catch (err) {
       console.error("Sign error:", err);
       if (notify) notify("Failed to sign — please try again", "warning");
+    }
+  };
+
+  const handleDecline = async () => {
+    if (!confirm("Are you sure you want to decline signing this document?")) return;
+    try {
+      const result = await db.declineEnvelope(id, "Signer declined");
+      if (result?.error) {
+        if (notify) notify(`Decline failed: ${result.error}`, "warning");
+        return;
+      }
+      setError("You have declined to sign this document.");
+    } catch (err) {
+      console.error("Decline error:", err);
+      if (notify) notify("Failed to decline", "warning");
     }
   };
 
@@ -494,9 +506,43 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
 
       {/* ESIGN consent */}
       <Card style={{ marginBottom: 16, padding: 16, display: "flex", gap: 12, alignItems: "flex-start" }}>
-        <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)}
+        <input type="checkbox" checked={agreed} onChange={async e => {
+          if (e.target.checked && !consentRecorded) {
+            try {
+              const result = await db.recordConsent(id, "us-v1-2025");
+              if (result?.error) {
+                if (notify) notify(`Consent failed: ${result.error}`, "warning");
+                return;
+              }
+              setConsentRecorded(true);
+              setAgreed(true);
+            } catch (err) {
+              console.error("Consent recording error:", err);
+              if (notify) notify("Failed to record consent", "warning");
+            }
+          } else {
+            setAgreed(e.target.checked);
+          }
+        }}
           style={{ marginTop: 2, accentColor: T.accent, width: 16, height: 16, flexShrink: 0 }} />
-        <label style={{ fontSize: 12, color: T.textSec, lineHeight: 1.5, cursor: "pointer" }} onClick={() => setAgreed(!agreed)}>
+        <label style={{ fontSize: 12, color: T.textSec, lineHeight: 1.5, cursor: "pointer" }} onClick={async () => {
+          if (!agreed && !consentRecorded) {
+            try {
+              const result = await db.recordConsent(id, "us-v1-2025");
+              if (result?.error) {
+                if (notify) notify(`Consent failed: ${result.error}`, "warning");
+                return;
+              }
+              setConsentRecorded(true);
+              setAgreed(true);
+            } catch (err) {
+              console.error("Consent recording error:", err);
+              if (notify) notify("Failed to record consent", "warning");
+            }
+          } else {
+            setAgreed(!agreed);
+          }
+        }}>
           I agree to use electronic signatures under the ESIGN Act (15 U.S.C. § 7001) and UETA. My signature is legally binding.
         </label>
       </Card>
@@ -511,6 +557,12 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
           Fill all {myFields.length - filledCount} remaining field{myFields.length - filledCount !== 1 ? "s" : ""} above before signing
         </p>
       )}
+      <div style={{ textAlign: "center", marginTop: 16 }}>
+        <button onClick={handleDecline} style={{
+          background: "none", border: "none", color: T.textDim, fontSize: 12,
+          cursor: "pointer", textDecoration: "underline", fontFamily: F.body,
+        }}>Decline to sign</button>
+      </div>
     </PageContainer>
   );
 }

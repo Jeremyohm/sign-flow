@@ -70,18 +70,29 @@ export async function onRequest(context) {
         const signerRows = signers.map((s, i) => ({
           envelope_id: envelope.id, name: s.name || "", email: s.email || "",
           role: s.role || "Signer", sort_order: i, status: "pending",
-          sign_token: crypto.randomUUID(), access_code: s.access_code || null,
+          sign_token: crypto.randomUUID(),
         }));
         const { data: sData } = await supabase.from("signers").insert(signerRows).select();
         createdSigners = (sData || []).map(s => formatSigner(s, appUrl));
+
+        // Hash access codes server-side if provided
+        for (let i = 0; i < signers.length; i++) {
+          if (signers[i].access_code && sData[i]) {
+            await supabase.rpc("set_access_code", {
+              p_sign_token: sData[i].sign_token,
+              p_code: signers[i].access_code,
+            });
+          }
+        }
       }
 
       let createdFields = [];
-      if (template_id) {
+      if (template_id && createdSigners.length > 0) {
         const { data: tmpl } = await supabase.from("templates").select("*").eq("id", template_id).eq("user_id", userId).single();
         if (tmpl && tmpl.fields) {
           const fieldRows = tmpl.fields.map(f => ({
-            envelope_id: envelope.id, signer_index: f.signer || 0,
+            envelope_id: envelope.id,
+            signer_id: createdSigners[f.signer || 0]?.id,
             type: f.type, page: f.page || 0, x: f.x, y: f.y, w: f.w, h: f.h,
           }));
           const { data: fData } = await supabase.from("fields").insert(fieldRows).select();
@@ -147,5 +158,5 @@ function formatSigner(s, appUrl) {
 }
 
 function formatField(f) {
-  return { id: f.id, type: f.type, page: f.page, signer_index: f.signer_index, x: Number(f.x), y: Number(f.y), w: Number(f.w), h: Number(f.h), value: f.value };
+  return { id: f.id, type: f.type, page: f.page, signer_id: f.signer_id, x: Number(f.x), y: Number(f.y), w: Number(f.w), h: Number(f.h), value: f.value };
 }

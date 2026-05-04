@@ -116,8 +116,12 @@ export function Prepare({ envelopes, notify, setEnvelopes, setTemplates, sendEma
         ...s, status: i === 0 ? "pending" : "waiting",
       })));
 
-      // Create fields
-      const dbFields = await db.createFields(env.id, fields);
+      // Create fields — map local signer index to actual signer_id
+      const fieldsWithSignerId = fields.map(f => ({
+        ...f,
+        signer_id: dbSigners[f.signer]?.id,
+      }));
+      const dbFields = await db.createFields(env.id, fieldsWithSignerId);
 
       // Update envelope status
       await db.updateEnvelope(env.id, { status: "sent" });
