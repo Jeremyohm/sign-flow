@@ -1,9 +1,12 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 /**
- * Merge text values into a PDF at specified coordinates.
+ * Merge field values into a PDF at specified coordinates.
  * fieldValues: [{ page, x, y, w, h, value }]
  * Coordinates: x/y from top-left of page (converted to PDF bottom-left origin internally).
+ *
+ * Values starting with "data:image/" are embedded as images (drawn signatures /
+ * initials). Anything else is rendered as text.
  */
 export async function mergePdfFields(pdfBytes, fieldValues) {
   const doc = await PDFDocument.load(pdfBytes);
@@ -13,17 +16,46 @@ export async function mergePdfFields(pdfBytes, fieldValues) {
   for (const field of fieldValues) {
     const page = pages[field.page || 0];
     if (!page) continue;
-    const { width: pw, height: ph } = page.getSize();
-    const fontSize = autoFontSize(font, field.value, field.w || 150, field.h || 14);
-    // field.y is from top, PDF y is from bottom
-    const pdfY = ph - (field.y || 0) - (field.h || 14);
-    page.drawText(String(field.value), {
+    const { height: ph } = page.getSize();
+    const fieldH = field.h || 14;
+    const fieldW = field.w || 150;
+    const pdfY = ph - (field.y || 0) - fieldH;
+
+    const value = field.value;
+
+    if (typeof value === "string" && value.startsWith("data:image/")) {
+      const match = value.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
+      if (!match) {
+        console.warn("Field has unrecognized image data URL; skipping");
+        continue;
+      }
+      const format = match[1].toLowerCase();
+      const b64 = match[2];
+
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+      let img;
+      try {
+        img = format === "png" ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+      } catch (err) {
+        console.error("Failed to embed image for field:", err);
+        continue;
+      }
+
+      page.drawImage(img, { x: field.x || 0, y: pdfY, width: fieldW, height: fieldH });
+      continue;
+    }
+
+    const fontSize = autoFontSize(font, value, fieldW, fieldH);
+    page.drawText(String(value ?? ""), {
       x: field.x || 0,
       y: pdfY + 2,
       size: fontSize,
       font,
       color: rgb(0.1, 0.1, 0.1),
-      maxWidth: field.w || 150,
+      maxWidth: fieldW,
     });
   }
 

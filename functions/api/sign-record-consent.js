@@ -1,8 +1,19 @@
 import { getSupabase } from "./_lib/auth.js";
+import { checkRateLimit } from "./_lib/rate-limit.js";
 
 export async function onRequestPost(context) {
   const { request, env } = context;
   const corsHeaders = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" };
+
+  const ip = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "unknown";
+  const ua = request.headers.get("user-agent") || "unknown";
+
+  const rl = await checkRateLimit(env.RATE_LIMIT_KV, `sign:${ip}`, 60, 60);
+  if (!rl.allowed) {
+    return new Response(JSON.stringify({ error: "rate_limited", retry_after: rl.retryAfter }), {
+      status: 429, headers: { ...corsHeaders, "Retry-After": String(rl.retryAfter) },
+    });
+  }
 
   const body = await request.json().catch(() => null);
   if (!body) return new Response(JSON.stringify({ error: "invalid_body" }), { status: 400, headers: corsHeaders });
@@ -11,9 +22,6 @@ export async function onRequestPost(context) {
   if (!sign_token || !disclosure_version) {
     return new Response(JSON.stringify({ error: "missing_params" }), { status: 400, headers: corsHeaders });
   }
-
-  const ip = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "unknown";
-  const ua = request.headers.get("user-agent") || "unknown";
 
   const supabase = getSupabase(env);
   const { data, error } = await supabase.rpc("record_consent", {

@@ -36,6 +36,20 @@ export async function onRequest(context) {
     env.SUPABASE_SERVICE_KEY
   );
 
+  // Idempotency: claim this event id before any state changes. If we've seen it
+  // before, return success so Stripe stops retrying.
+  const { data: isFirstSeen, error: claimError } = await supabase.rpc("claim_stripe_event", {
+    p_event_id: event.id,
+    p_event_type: event.type,
+  });
+  if (claimError) {
+    console.error("Failed to claim stripe event", claimError);
+    return Response.json({ error: "idempotency_check_failed" }, { status: 500 });
+  }
+  if (!isFirstSeen) {
+    return Response.json({ received: true, duplicate: true }, { status: 200 });
+  }
+
   try {
     switch (event.type) {
       case "checkout.session.completed": {

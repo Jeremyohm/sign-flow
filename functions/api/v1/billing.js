@@ -59,7 +59,7 @@ export async function onRequest(context) {
         const { data: { user: authUser } } = await supabase.auth.admin.getUserById(userId);
         const customer = await stripe.customers.create({
           email: authUser?.email,
-          metadata: { legacysign_user_id: userId },
+          metadata: { signflow_user_id: userId },
         });
         customerId = customer.id;
         await supabase.from("subscriptions")

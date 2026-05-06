@@ -1,391 +1,477 @@
-import { useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { F, STATUS, SC } from "../theme";
-import { fd, ft, useDocTitle, useT } from "../utils";
-import { Ic, I, Btn, Badge, Card, PageContainer, Input } from "../components/ui";
+import { useAuth } from "../lib/AuthContext";
+import { useDocTitle } from "../utils";
+import { LogoMark } from "../components/ui";
+import { DocumentRow, Zone } from "../components/app";
 import * as db from "../lib/db";
 
-export function Dashboard({ envelopes, setEnvelopes, notify }) {
-  const T = useT();
+const C = {
+  ink:       "#0F1418",
+  muted:     "#5A6168",
+  soft:      "#8A8A82",
+  forest:    "#1E5128",
+  forestDark:"#163E1F",
+  paperWarm: "#F2F2EE",
+  border:    "#E0E0DC",
+};
+
+const FONT_SERIF = "'Fraunces', Georgia, serif";
+const FONT_SANS  = "'Inter', system-ui, sans-serif";
+
+// "Time ago" — minimal humanizer for ISO timestamps
+function timeAgo(iso) {
+  if (!iso) return "";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (isNaN(ms)) return "";
+  const secs = Math.max(0, Math.floor(ms / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
+function formatDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function greetingPrefix() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function deriveFirstName(user) {
+  const meta = user?.user_metadata || {};
+  if (meta.first_name) return meta.first_name;
+  if (meta.full_name) return String(meta.full_name).split(" ")[0];
+  return null;
+}
+
+export function Dashboard({ envelopes = [], notify }) {
   useDocTitle("Documents");
   const navigate = useNavigate();
-  const [showAll, setShowAll] = useState(false);
-  const [filter, setFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const [deleteId, setDeleteId] = useState(null);
+  const { user } = useAuth();
 
-  // Categorize envelopes
-  const actionNeeded = envelopes.filter(e => e.status === "sent" || e.status === "in_progress");
-  const drafts = envelopes.filter(e => e.status === "draft");
-  const completed = envelopes.filter(e => e.status === "completed");
+  const userEmail = user?.email?.toLowerCase() || "";
+  const firstName = deriveFirstName(user);
 
-  // Build activity feed from envelope events
-  const activities = [];
-  for (const env of envelopes) {
-    if (env.status !== "draft") {
-      activities.push({ type: "sent", label: `"${env.name}" sent for signing`, time: env.updatedAt || env.createdAt, envId: env.id });
-    }
-    for (const s of env.signers) {
-      if (s.status === "signed" && s.signedAt) {
-        activities.push({ type: "signed", label: `${s.name || "Signer"} signed "${env.name}"`, time: s.signedAt, envId: env.id });
-      }
-    }
-    if (env.status === "completed") {
-      activities.push({ type: "completed", label: `"${env.name}" — all signatures complete`, time: env.updatedAt, envId: env.id });
-    }
+  const buckets = useMemo(() => {
+    // Awaiting you: envelopes where the current user is a signer who hasn't signed
+    const awaitingYou = envelopes.filter(e => {
+      if (e.status === "completed" || e.status === "draft" || e.status === "declined") return false;
+      const me = (e.signers || []).find(s => (s.email || "").toLowerCase() === userEmail);
+      return me && me.status !== "signed";
+    });
+
+    const drafts = envelopes.filter(e => e.status === "draft");
+
+    const awaitingOthers = envelopes.filter(e => {
+      if (e.status !== "sent" && e.status !== "in_progress") return false;
+      // Exclude ones already counted in "awaiting you"
+      return !awaitingYou.includes(e);
+    });
+
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const recentlyCompleted = envelopes
+      .filter(e => {
+        if (e.status !== "completed") return false;
+        const t = new Date(e.updated_at || e.updatedAt || e.created_at || e.createdAt).getTime();
+        return !isNaN(t) && t >= thirtyDaysAgo;
+      })
+      .sort((a, b) => {
+        const ta = new Date(a.updated_at || a.updatedAt || 0).getTime();
+        const tb = new Date(b.updated_at || b.updatedAt || 0).getTime();
+        return tb - ta;
+      })
+      .slice(0, 5);
+
+    return { awaitingYou, awaitingOthers, recentlyCompleted, drafts };
+  }, [envelopes, userEmail]);
+
+  // Empty state — never created an envelope
+  if (envelopes.length === 0) {
+    return <EmptyState navigate={navigate} />;
   }
-  activities.sort((a, b) => new Date(b.time) - new Date(a.time));
-  const recentActivity = activities.slice(0, 8);
 
-  // Filtered table
-  const byStatus = filter === "all" ? envelopes : envelopes.filter(e => e.status === filter);
-  const filtered = search.trim()
-    ? byStatus.filter(e => e.name.toLowerCase().includes(search.toLowerCase()))
-    : byStatus;
+  // Status sub-line
+  const subline = buildSubline(buckets);
 
-  const confirmDelete = async () => {
+  // Stats strip — only if user has 5+ envelopes
+  const showStats = envelopes.length >= 5;
+  const stats = showStats ? computeStats(envelopes) : null;
+
+  const handleSignedDownload = async (env) => {
     try {
-      await db.deleteEnvelope(deleteId);
-      setEnvelopes(p => p.filter(e => e.id !== deleteId));
-      notify("Envelope deleted");
+      const url = await db.fetchSignedDocumentUrl(env.id);
+      window.location.href = url;
     } catch (err) {
-      console.error("Delete error:", err);
-      notify("Failed to delete", "warning");
+      if (err.status === 425) notify?.("Document still being generated", "warning");
+      else notify?.("Download failed", "warning");
     }
-    setDeleteId(null);
-  };
-  const envToDelete = deleteId ? envelopes.find(e => e.id === deleteId) : null;
-
-  const activityIcon = (type) => {
-    if (type === "signed") return I.pen;
-    if (type === "completed") return I.check;
-    return I.send;
-  };
-  const activityColor = (type) => {
-    if (type === "signed") return T.accent;
-    if (type === "completed") return T.success;
-    return T.warm;
   };
 
   return (
-    <PageContainer>
-      {/* Header */}
-      <div className="sf-page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 4 }}>
-            <img src="/logo.png" alt="True Legacy Homes" style={{ height: 40 }} />
-            <h1 style={{ fontFamily: F.display, fontSize: 26, fontWeight: 600, margin: 0 }}>Welcome back</h1>
-          </div>
-          <p style={{ fontSize: 13, color: T.textSec, margin: 0 }}>
-            {actionNeeded.length > 0
-              ? `${actionNeeded.length} document${actionNeeded.length !== 1 ? "s" : ""} need attention`
-              : "All caught up — no documents need action"}
+    <div style={{ fontFamily: FONT_SANS }}>
+      {/* 1. Greeting + primary action bar */}
+      <header
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 24,
+          marginBottom: 40,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h1
+            style={{
+              fontFamily: FONT_SERIF,
+              fontSize: 32,
+              fontWeight: 600,
+              letterSpacing: "-0.02em",
+              color: C.ink,
+              margin: "0 0 6px",
+              lineHeight: 1.1,
+            }}
+          >
+            {firstName ? `${greetingPrefix()}, ${firstName}.` : "Welcome back."}
+          </h1>
+          <p style={{ fontSize: 15, color: C.muted, margin: 0, lineHeight: 1.5 }}>
+            {subline}
           </p>
         </div>
-        <Btn onClick={() => navigate("/new")}><Ic d={I.plus} size={15} color={T.white} s /> New Envelope</Btn>
-      </div>
-
-      {/* Quick stats bar */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 24 }}>
-        {[
-          { label: "Action Needed", value: actionNeeded.length, color: T.warm, bg: T.warmSoft },
-          { label: "Drafts", value: drafts.length, color: T.textDim, bg: `${T.textDim}10` },
-          { label: "Completed", value: completed.length, color: T.success, bg: T.successSoft },
-          { label: "Total", value: envelopes.length, color: T.accent, bg: T.accentSoft },
-        ].map(s => (
-          <div key={s.label} style={{ flex: 1, display: "flex", alignItems: "center", gap: 10,
-            padding: "12px 16px", borderRadius: 10, background: T.surface,
-            border: `1px solid ${T.border}` }}>
-            <span style={{ fontSize: 22, fontWeight: 700, color: s.color, fontFamily: F.display }}>{s.value}</span>
-            <span style={{ fontSize: 10, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: 0.5 }}>{s.label}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Action Needed section */}
-      {actionNeeded.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: T.warm, animation: "pulse 2s infinite" }} />
-            <h2 style={{ fontFamily: F.body, fontSize: 14, fontWeight: 700, margin: 0, color: T.text, textTransform: "uppercase", letterSpacing: 0.5 }}>
-              Action Needed
-            </h2>
-            <span style={{ fontSize: 11, color: T.textDim }}>({actionNeeded.length})</span>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
-            {actionNeeded.map(env => {
-              const signedCount = env.signers.filter(s => s.status === "signed").length;
-              const totalSigners = env.signers.length;
-              const progress = totalSigners > 0 ? (signedCount / totalSigners) * 100 : 0;
-              const pendingSigner = env.signers.find(s => s.status === "pending");
-              return (
-                <Card key={env.id} hover onClick={() => navigate(`/envelope/${env.id}`)}
-                  style={{ padding: 0, overflow: "hidden", cursor: "pointer" }}>
-                  {/* Amber top accent */}
-                  <div style={{ height: 3, background: `linear-gradient(90deg, ${T.warm}, ${T.accent})` }} />
-                  <div style={{ padding: "16px 20px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: T.text, overflow: "hidden",
-                          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{env.name}</div>
-                        <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>
-                          {env.pages} page{env.pages > 1 ? "s" : ""} · {fd(env.updatedAt)}
-                        </div>
-                      </div>
-                      <Badge color={STATUS[env.status].color} bg={STATUS[env.status].bg}>{STATUS[env.status].label}</Badge>
-                    </div>
-                    {/* Signer progress */}
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 10, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: 0.3 }}>
-                          Signatures
-                        </span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: T.accent }}>{signedCount}/{totalSigners}</span>
-                      </div>
-                      <div style={{ height: 4, borderRadius: 4, background: T.bgWarm, overflow: "hidden" }}>
-                        <div style={{ height: "100%", borderRadius: 4, width: `${progress}%`,
-                          background: `linear-gradient(90deg, ${T.accent}, ${T.success})`,
-                          transition: "width 0.4s ease" }} />
-                      </div>
-                    </div>
-                    {/* Signer avatars */}
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <div style={{ display: "flex", gap: 4 }}>
-                        {env.signers.map((s, i) => (
-                          <div key={s.id} title={`${s.name || "Signer"} — ${s.status}`} style={{
-                            width: 26, height: 26, borderRadius: "50%",
-                            background: s.status === "signed" ? T.success : s.status === "pending" ? `${SC[i % 3]}25` : T.surfaceAlt,
-                            color: s.status === "signed" ? T.white : s.status === "pending" ? SC[i % 3] : T.textDim,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 10, fontWeight: 700,
-                            border: s.status === "pending" ? `2px solid ${SC[i % 3]}` : `2px solid ${T.border}`,
-                          }}>
-                            {s.status === "signed" ? <Ic d={I.check} size={11} color={T.white} s /> : (s.name || "?").charAt(0).toUpperCase()}
-                          </div>
-                        ))}
-                      </div>
-                      <Btn size="sm" onClick={e => { e.stopPropagation(); navigate(`/sign/${env.id}`); }}>
-                        <Ic d={I.pen} size={11} color={T.white} s /> Sign Now
-                      </Btn>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Two column: Recent Activity + Drafts */}
-      <div style={{ display: "grid", gridTemplateColumns: recentActivity.length > 0 && drafts.length > 0 ? "1.4fr 1fr" : "1fr", gap: 16, marginBottom: 28 }}>
-        {/* Recent Activity */}
-        {recentActivity.length > 0 && (
-          <Card style={{ padding: 0, overflow: "hidden" }}>
-            <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 8 }}>
-              <Ic d={I.clock} size={14} color={T.textDim} s />
-              <span style={{ fontSize: 12, fontWeight: 700, color: T.text, textTransform: "uppercase", letterSpacing: 0.5 }}>Recent Activity</span>
-            </div>
-            <div style={{ padding: "8px 0" }}>
-              {recentActivity.map((a, i) => (
-                <div key={i} onClick={() => navigate(`/envelope/${a.envId}`)}
-                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 20px",
-                    cursor: "pointer", transition: "background 0.12s" }}
-                  onMouseEnter={e => e.currentTarget.style.background = T.surfaceHover}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-                    background: `${activityColor(a.type)}10`,
-                    display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Ic d={activityIcon(a.type)} size={13} color={activityColor(a.type)} s />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: T.text, overflow: "hidden",
-                      textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.label}</div>
-                    <div style={{ fontSize: 10, color: T.textDim }}>{fd(a.time)} · {ft(a.time)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
-
-        {/* Drafts */}
-        {drafts.length > 0 && (
-          <Card style={{ padding: 0, overflow: "hidden" }}>
-            <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 8 }}>
-              <Ic d={I.doc} size={14} color={T.textDim} s />
-              <span style={{ fontSize: 12, fontWeight: 700, color: T.text, textTransform: "uppercase", letterSpacing: 0.5 }}>Drafts</span>
-              <span style={{ fontSize: 10, color: T.textDim }}>({drafts.length})</span>
-            </div>
-            <div style={{ padding: "8px 0" }}>
-              {drafts.map(env => (
-                <div key={env.id} onClick={() => navigate(`/envelope/${env.id}`)}
-                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 20px",
-                    cursor: "pointer", transition: "background 0.12s" }}
-                  onMouseEnter={e => e.currentTarget.style.background = T.surfaceHover}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-                    background: T.surfaceAlt, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Ic d={I.doc} size={13} color={T.textDim} s />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text, overflow: "hidden",
-                      textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{env.name}</div>
-                    <div style={{ fontSize: 10, color: T.textDim }}>{env.pages} page{env.pages > 1 ? "s" : ""} · {fd(env.createdAt)}</div>
-                  </div>
-                  <Btn size="sm" variant="secondary" onClick={e => { e.stopPropagation(); navigate(`/prepare/${env.id}`); }}>
-                    Prepare
-                  </Btn>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
-      </div>
-
-      {/* All Documents table */}
-      <div style={{ marginBottom: 12 }}>
-        <button onClick={() => setShowAll(!showAll)}
-          style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none",
-            cursor: "pointer", fontFamily: F.body, padding: 0 }}>
-          <h2 style={{ fontFamily: F.body, fontSize: 14, fontWeight: 700, margin: 0, color: T.text,
-            textTransform: "uppercase", letterSpacing: 0.5 }}>
-            All Documents
-          </h2>
-          <span style={{ fontSize: 11, color: T.textDim }}>({envelopes.length})</span>
-          <Ic d={showAll ? "M18 15l-6-6-6 6" : "M6 9l6 6 6-6"} size={14} color={T.textDim} s />
+        <button
+          type="button"
+          onClick={() => navigate("/new")}
+          className="db-newbtn"
+          style={{
+            padding: "11px 18px",
+            background: C.forest,
+            color: "#FAFAF7",
+            border: "none",
+            borderRadius: 6,
+            fontFamily: FONT_SANS,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+            letterSpacing: "0.01em",
+            transition: "background 150ms ease, transform 80ms ease",
+            flexShrink: 0,
+          }}
+        >
+          New envelope
         </button>
+      </header>
+
+      <style>{`
+        .db-newbtn:hover { background: ${C.forestDark}; transform: translateY(-1px); }
+        .db-newbtn:active { transform: translateY(0); }
+        .lp-doc-row:hover { background: ${C.paperWarm}; }
+        .lp-doc-row:hover .lp-doc-row-action { transform: translateX(3px); }
+        .db-link:hover { text-decoration: underline; }
+      `}</style>
+
+      {/* 2. Stats strip — only ≥5 envelopes */}
+      {showStats && stats && (
+        <section
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 32,
+            paddingBottom: 32,
+            marginBottom: 40,
+            borderBottom: `1px solid ${C.border}`,
+          }}
+        >
+          <Stat label="This month" value={`${stats.thisMonth} ${stats.thisMonth === 1 ? "envelope" : "envelopes"}`} />
+          <Stat label="Awaiting signers" value={String(stats.awaitingSigners)} />
+          <Stat label="Completion rate" value={`${stats.completionRate}%`} />
+        </section>
+      )}
+
+      {/* 3a. Awaiting you */}
+      {buckets.awaitingYou.length > 0 && (
+        <Zone title="Awaiting you" count={buckets.awaitingYou.length}>
+          {buckets.awaitingYou.map((e, i, arr) => (
+            <DocumentRow
+              key={e.id}
+              status="green"
+              name={e.name}
+              subline={`Sent · ${timeAgo(e.updated_at || e.updatedAt || e.created_at || e.createdAt)}`}
+              actionLabel="Sign now →"
+              onClick={() => navigate(`/sign/${(e.signers || []).find(s => (s.email || "").toLowerCase() === userEmail)?.sign_token || e.id}`)}
+              isLast={i === arr.length - 1}
+            />
+          ))}
+        </Zone>
+      )}
+
+      {/* 3b. Awaiting others */}
+      <Zone title="Awaiting others" count={buckets.awaitingOthers.length}>
+        {buckets.awaitingOthers.length === 0 ? (
+          <EmptyZoneLine>No envelopes out for signature.</EmptyZoneLine>
+        ) : (
+          buckets.awaitingOthers.map((e, i, arr) => {
+            const signers = e.signers || [];
+            const signed = signers.filter(s => s.status === "signed").length;
+            const total = signers.length || 0;
+            return (
+              <DocumentRow
+                key={e.id}
+                status="amber"
+                name={e.name}
+                subline={`Sent ${timeAgo(e.updated_at || e.updatedAt || e.created_at || e.createdAt)} · ${signed} of ${total} signed`}
+                actionLabel="View →"
+                onClick={() => navigate(`/envelope/${e.id}`)}
+                isLast={i === arr.length - 1}
+              />
+            );
+          })
+        )}
+      </Zone>
+
+      {/* 3c. Recently completed (last 30 days, max 5) */}
+      {buckets.recentlyCompleted.length > 0 && (
+        <Zone
+          title="Recently completed"
+          footer={
+            envelopes.filter(e => e.status === "completed").length > 5 ? (
+              <a
+                href="#"
+                onClick={(ev) => { ev.preventDefault(); navigate("/"); }}
+                className="db-link"
+                style={{ fontSize: 13, color: C.forest, textDecoration: "none", fontWeight: 600 }}
+              >
+                View all completed →
+              </a>
+            ) : null
+          }
+        >
+          {buckets.recentlyCompleted.map((e, i, arr) => {
+            const signerCount = (e.signers || []).length;
+            return (
+              <DocumentRow
+                key={e.id}
+                status="green"
+                name={e.name}
+                subline={`Completed ${formatDate(e.updated_at || e.updatedAt)} · ${signerCount} ${signerCount === 1 ? "signer" : "signers"}`}
+                actionLabel="Download →"
+                onClick={() => handleSignedDownload(e)}
+                isLast={i === arr.length - 1}
+              />
+            );
+          })}
+        </Zone>
+      )}
+
+      {/* 4. Drafts */}
+      {buckets.drafts.length > 0 && (
+        <Zone title="Drafts" count={buckets.drafts.length}>
+          {buckets.drafts.map((e, i, arr) => (
+            <DocumentRow
+              key={e.id}
+              status="gray"
+              name={e.name || "Untitled draft"}
+              subline={`Created ${timeAgo(e.created_at || e.createdAt)}`}
+              actionLabel="Continue →"
+              onClick={() => navigate(`/prepare/${e.id}`)}
+              isLast={i === arr.length - 1}
+            />
+          ))}
+        </Zone>
+      )}
+
+      {/* 5. Footer link */}
+      <div style={{ marginTop: 40, paddingTop: 24, borderTop: `1px solid ${C.border}` }}>
+        <a
+          href="#"
+          onClick={(ev) => { ev.preventDefault(); /* no separate listing page yet */ }}
+          className="db-link"
+          style={{
+            fontSize: 13,
+            color: C.muted,
+            textDecoration: "none",
+            fontWeight: 500,
+          }}
+          aria-disabled="true"
+          title="Full document list — coming soon"
+        >
+          View all documents →
+        </a>
       </div>
+    </div>
+  );
+}
 
-      {showAll && (
-        <>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {["all", "draft", "sent", "in_progress", "completed"].map(f => (
-                <button key={f} onClick={() => setFilter(f)} style={{
-                  padding: "5px 12px", borderRadius: 6,
-                  border: `1px solid ${filter === f ? T.accent : T.border}`,
-                  background: filter === f ? T.accentSoft : "transparent",
-                  color: filter === f ? T.accent : T.textSec,
-                  fontSize: 12, fontWeight: 600, fontFamily: F.body, cursor: "pointer", textTransform: "capitalize",
-                }}>{f === "all" ? "All" : f.replace("_", " ")}</button>
-              ))}
-            </div>
-            <div style={{ flex: 1, minWidth: 180, maxWidth: 280 }}>
-              <Input size="sm" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search documents..." />
-            </div>
-          </div>
-          <Card style={{ padding: 0, overflow: "hidden", marginBottom: 20 }}>
-            <div className="sf-table-wrap" style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead><tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                  {["Document", "Status", "Signers", "Progress", "Updated", ""].map((h, i) => (
-                    <th key={i} style={{ padding: "12px 16px", textAlign: "left", fontSize: 10, fontWeight: 700,
-                      color: T.textDim, textTransform: "uppercase", letterSpacing: 0.8 }}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>{filtered.map(env => {
-                  const st = STATUS[env.status];
-                  const signedCount = env.signers.filter(s => s.status === "signed").length;
-                  const totalSigners = env.signers.length;
-                  const progress = totalSigners > 0 ? (signedCount / totalSigners) * 100 : 0;
-                  return (
-                    <tr key={env.id} onClick={() => navigate(`/envelope/${env.id}`)}
-                      style={{ borderBottom: `1px solid ${T.borderLight}`, cursor: "pointer", transition: "background 0.12s" }}
-                      onMouseEnter={e => e.currentTarget.style.background = T.surfaceHover}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <td style={{ padding: "14px 16px" }}>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{env.name}</div>
-                        <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>{env.pages} page{env.pages > 1 ? "s" : ""}</div>
-                      </td>
-                      <td style={{ padding: "14px 16px" }}><Badge color={st.color} bg={st.bg}>{st.label}</Badge></td>
-                      <td style={{ padding: "14px 16px" }}>
-                        <div style={{ display: "flex" }}>
-                          {env.signers.map((s, i) => (
-                            <div key={s.id} title={`${s.name || "Signer"} — ${s.status}`} style={{
-                              width: 26, height: 26, borderRadius: "50%",
-                              background: s.status === "signed" ? T.success : s.status === "pending" ? T.warmSoft : T.surfaceAlt,
-                              border: `2px solid ${T.surface}`, display: "flex", alignItems: "center", justifyContent: "center",
-                              marginLeft: i > 0 ? -6 : 0, zIndex: env.signers.length - i,
-                              fontSize: 10, fontWeight: 700,
-                              color: s.status === "signed" ? T.white : s.status === "pending" ? T.warm : T.textDim,
-                            }}>{s.status === "signed" ? <Ic d={I.check} size={10} color={T.white} s /> : (s.name || "?").charAt(0).toUpperCase()}</div>
-                          ))}
-                        </div>
-                      </td>
-                      <td style={{ padding: "14px 16px", width: 120 }}>
-                        {totalSigners > 0 ? (
-                          <div>
-                            <div style={{ height: 4, borderRadius: 4, background: T.bgWarm, overflow: "hidden" }}>
-                              <div style={{ height: "100%", borderRadius: 4, width: `${progress}%`,
-                                background: progress === 100 ? T.success : T.accent, transition: "width 0.4s ease" }} />
-                            </div>
-                            <div style={{ fontSize: 10, color: T.textDim, marginTop: 3 }}>{signedCount}/{totalSigners} signed</div>
-                          </div>
-                        ) : <span style={{ fontSize: 11, color: T.textDim }}>—</span>}
-                      </td>
-                      <td style={{ padding: "14px 16px", fontSize: 12, color: T.textSec }}>{fd(env.updatedAt)}</td>
-                      <td style={{ padding: "14px 16px" }}>
-                        <button onClick={e => { e.stopPropagation(); setDeleteId(env.id); }}
-                          title="Delete" style={{ background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4 }}>
-                          <Ic d={I.trash} size={14} color={T.textDim} s />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}</tbody>
-              </table>
-            </div>
-            {filtered.length === 0 && (
-              <div style={{ padding: 48, textAlign: "center" }}>
-                <p style={{ color: T.textDim, fontSize: 14 }}>{search ? "No documents match your search" : "No documents match this filter"}</p>
-              </div>
-            )}
-          </Card>
-        </>
-      )}
+// ───────────────── Helpers + subcomponents ─────────────────
 
-      {/* Empty state when nothing exists */}
-      {envelopes.length === 0 && (
-        <Card style={{ textAlign: "center", padding: 48 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 16, background: T.accentSoft,
-            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-            <Ic d={I.doc} size={24} color={T.accent} s />
-          </div>
-          <h3 style={{ fontFamily: F.display, fontSize: 18, fontWeight: 600, margin: "0 0 8px" }}>No documents yet</h3>
-          <p style={{ fontSize: 13, color: T.textSec, marginBottom: 20 }}>Create your first envelope to get started with electronic signing.</p>
-          <Btn onClick={() => navigate("/new")}><Ic d={I.plus} size={15} color={T.white} s /> New Envelope</Btn>
-        </Card>
-      )}
+function buildSubline({ awaitingYou, awaitingOthers }) {
+  const others = awaitingOthers.length;
+  const you = awaitingYou.length;
+  if (others === 0 && you === 0) return "All caught up — nothing needs your attention.";
+  if (you > 0 && others > 0) {
+    return `${others} ${others === 1 ? "envelope" : "envelopes"} awaiting signers · ${you} awaiting you`;
+  }
+  if (you > 0) return `${you} ${you === 1 ? "envelope" : "envelopes"} awaiting you.`;
+  return `${others} ${others === 1 ? "envelope" : "envelopes"} awaiting signers.`;
+}
 
-      {/* Delete confirmation */}
-      {envToDelete && (
-        <div onClick={() => setDeleteId(null)} style={{
-          position: "fixed", inset: 0, background: "rgba(44,42,37,0.4)", zIndex: 200,
-          display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-          backdropFilter: "blur(4px)", animation: "fadeIn 0.2s ease",
-        }}>
-          <div onClick={e => e.stopPropagation()} style={{
-            background: T.surface, borderRadius: 16, padding: 24, width: "100%", maxWidth: 360,
-            boxShadow: T.shadowLg, textAlign: "center",
-          }}>
-            <div style={{ width: 44, height: 44, borderRadius: 12, background: T.errorSoft,
-              display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
-              <Ic d={I.trash} size={20} color={T.error} s />
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 8 }}>Delete Envelope?</div>
-            <p style={{ fontSize: 13, color: T.textSec, marginBottom: 20, lineHeight: 1.5 }}>
-              "{envToDelete.name}" will be permanently removed. This action cannot be undone.
-            </p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-              <Btn variant="secondary" onClick={() => setDeleteId(null)}>Cancel</Btn>
-              <Btn variant="danger" onClick={confirmDelete}><Ic d={I.trash} size={13} color={T.error} s /> Delete</Btn>
-            </div>
-          </div>
-        </div>
-      )}
+function computeStats(envelopes) {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const thisMonth = envelopes.filter(e => {
+    const t = new Date(e.created_at || e.createdAt || 0).getTime();
+    return !isNaN(t) && t >= monthStart;
+  }).length;
 
-      {/* Pulse animation */}
-      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
-    </PageContainer>
+  const awaitingSigners = envelopes.filter(
+    e => e.status === "sent" || e.status === "in_progress",
+  ).length;
+
+  const closed = envelopes.filter(e => e.status === "completed" || e.status === "declined").length;
+  const completedCount = envelopes.filter(e => e.status === "completed").length;
+  const completionRate = closed > 0 ? Math.round((completedCount / closed) * 100) : 0;
+
+  return { thisMonth, awaitingSigners, completionRate };
+}
+
+function Stat({ label, value }) {
+  return (
+    <div>
+      <div
+        style={{
+          fontFamily: FONT_SANS,
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: C.muted,
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontFamily: FONT_SERIF,
+          fontSize: 22,
+          fontWeight: 600,
+          color: C.ink,
+          letterSpacing: "-0.01em",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function EmptyZoneLine({ children }) {
+  return (
+    <div
+      style={{
+        padding: "14px 12px",
+        fontSize: 13,
+        color: C.soft,
+        fontStyle: "italic",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function EmptyState({ navigate }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+        minHeight: "60vh",
+        padding: "40px 24px",
+        fontFamily: FONT_SANS,
+      }}
+    >
+      <div style={{ marginBottom: 24, opacity: 0.45 }}>
+        <LogoMark size={64} color={C.forest} />
+      </div>
+      <h1
+        style={{
+          fontFamily: FONT_SERIF,
+          fontSize: 36,
+          fontWeight: 600,
+          letterSpacing: "-0.02em",
+          color: C.ink,
+          margin: "0 0 12px",
+          lineHeight: 1.1,
+        }}
+      >
+        Send your first envelope.
+      </h1>
+      <p
+        style={{
+          fontSize: 16,
+          color: C.muted,
+          lineHeight: 1.55,
+          maxWidth: 520,
+          margin: "0 0 28px",
+        }}
+      >
+        Upload a PDF, add signers, and send. The signed copy and audit trail come back automatically.
+      </p>
+      <button
+        type="button"
+        onClick={() => navigate("/new")}
+        className="db-newbtn"
+        style={{
+          padding: "13px 26px",
+          background: C.forest,
+          color: "#FAFAF7",
+          border: "none",
+          borderRadius: 6,
+          fontFamily: FONT_SANS,
+          fontSize: 15,
+          fontWeight: 600,
+          cursor: "pointer",
+          letterSpacing: "0.01em",
+          transition: "background 150ms ease, transform 80ms ease",
+          marginBottom: 16,
+        }}
+      >
+        New envelope
+      </button>
+      <a
+        href="#"
+        onClick={(ev) => { ev.preventDefault(); navigate("/templates"); }}
+        style={{
+          fontSize: 13,
+          color: C.forest,
+          fontWeight: 500,
+          textDecoration: "none",
+        }}
+      >
+        Or start from a template
+      </a>
+      <style>{`
+        .db-newbtn:hover { background: ${C.forestDark}; transform: translateY(-1px); }
+        .db-newbtn:active { transform: translateY(0); }
+      `}</style>
+    </div>
   );
 }

@@ -77,7 +77,7 @@ export function Notifications({ emails }) {
             <div style={{ padding: "12px 20px", background: T.surfaceAlt, borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
               <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
                 <span style={{ color: T.textDim, width: 50 }}>From:</span>
-                <span style={{ color: T.text, fontWeight: 500 }}>Legacy Sign &lt;noreply@sign.yourserver.com&gt;</span>
+                <span style={{ color: T.text, fontWeight: 500 }}>Sign Flow &lt;noreply@sign.yourserver.com&gt;</span>
               </div>
               <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
                 <span style={{ color: T.textDim, width: 50 }}>To:</span>
@@ -96,7 +96,7 @@ export function Notifications({ emails }) {
                     display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
                     <Ic d={I.shield} size={20} color={T.accent} s />
                   </div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: T.text }}>Legacy Sign</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: T.text }}>Sign Flow</div>
                 </div>
                 <div style={{ fontSize: 14, color: T.text, lineHeight: 1.6, marginBottom: 16 }}>
                   Hi {preview.toName},
@@ -108,7 +108,7 @@ export function Notifications({ emails }) {
                 </div>
                 <div style={{ background: T.surface, borderRadius: 10, border: `1px solid ${T.border}`, padding: 16, marginBottom: 20 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{preview.envelopeName}</div>
-                  <div style={{ fontSize: 12, color: T.textDim, marginTop: 4 }}>Sent by: Legacy Sign on behalf of the sender</div>
+                  <div style={{ fontSize: 12, color: T.textDim, marginTop: 4 }}>Sent by: Sign Flow on behalf of the sender</div>
                 </div>
                 <div style={{ textAlign: "center", marginBottom: 20 }}>
                   <div style={{

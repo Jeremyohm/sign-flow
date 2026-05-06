@@ -25,10 +25,20 @@ export async function fetchEnvelopeWithDetails(id) {
   };
 }
 
-export async function createEnvelope(userId, { name, pages, routing, pdfUrl, templateFields }) {
+export async function createEnvelope(userId, { name, pages, routing, pdfUrl, original_pdf_sha256, expires_at, templateFields }) {
+  const insertRow = {
+    user_id: userId,
+    name,
+    pages,
+    routing: routing || "sequential",
+    pdf_url: pdfUrl || null,
+    original_pdf_sha256: original_pdf_sha256 || null,
+  };
+  if (expires_at) insertRow.expires_at = expires_at;
+
   const { data: env, error } = await supabase
     .from("envelopes")
-    .insert({ user_id: userId, name, pages, routing: routing || "sequential", pdf_url: pdfUrl || null })
+    .insert(insertRow)
     .select()
     .single();
   if (error) throw error;
@@ -62,6 +72,7 @@ export async function createSigners(envelopeId, signers) {
     status: s.status || "pending",
     sort_order: i,
     sign_token: crypto.randomUUID(),
+    recipient_type: s.recipient_type === "cc" ? "cc" : "signer",
   }));
   const { data, error } = await supabase.from("signers").insert(rows).select();
   if (error) throw error;
@@ -121,6 +132,28 @@ export async function createFields(envelopeId, fields) {
   return data;
 }
 
+export async function createField(envelopeId, field) {
+  const { data, error } = await supabase
+    .from("fields")
+    .insert({
+      envelope_id: envelopeId,
+      signer_id: field.signer_id || null,
+      type: field.type,
+      page: field.page,
+      x: field.x, y: field.y, w: field.w, h: field.h,
+      value: field.value || null,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteField(id) {
+  const { error } = await supabase.from("fields").delete().eq("id", id);
+  if (error) throw error;
+}
+
 export async function updateField(id, updates) {
   const { data, error } = await supabase
     .from("fields")
@@ -150,16 +183,30 @@ export async function fetchTemplates(userId) {
 }
 
 export async function createTemplate(userId, template) {
+  const row = {
+    user_id: userId,
+    name: template.name,
+    description: template.description || "",
+    pages: template.pages,
+    signer_roles: template.signerRoles || template.signer_roles || [],
+    fields: template.fields || [],
+  };
+  if (template.pdf_url) row.pdf_url = template.pdf_url;
+  if (template.original_pdf_sha256) row.original_pdf_sha256 = template.original_pdf_sha256;
   const { data, error } = await supabase
     .from("templates")
-    .insert({
-      user_id: userId,
-      name: template.name,
-      description: template.description || "",
-      pages: template.pages,
-      signer_roles: template.signerRoles || [],
-      fields: template.fields || [],
-    })
+    .insert(row)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateTemplate(id, updates) {
+  const { data, error } = await supabase
+    .from("templates")
+    .update(updates)
+    .eq("id", id)
     .select()
     .single();
   if (error) throw error;
@@ -169,6 +216,33 @@ export async function createTemplate(userId, template) {
 export async function deleteTemplate(id) {
   const { error } = await supabase.from("templates").delete().eq("id", id);
   if (error) throw error;
+}
+
+// Increment usage_count + stamp last_used_at when a template is consumed.
+export async function recordTemplateUse(id, currentUsageCount = 0) {
+  const { data, error } = await supabase
+    .from("templates")
+    .update({
+      usage_count: (currentUsageCount || 0) + 1,
+      last_used_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Copy a stored PDF object within the pdfs bucket (used when saving a template
+// from an existing envelope — template gets its own copy so deleting the
+// envelope doesn't strand the template).
+export async function copyPdfForTemplate(sourcePath, userId) {
+  const targetPath = `templates/${userId}/${crypto.randomUUID()}.pdf`;
+  // Download → re-upload. supabase.storage.move() would also work but it
+  // moves rather than copies. The .copy() API is the right call.
+  const { error } = await supabase.storage.from("pdfs").copy(sourcePath, targetPath);
+  if (error) throw error;
+  return targetPath;
 }
 
 // ── Emails ──
@@ -286,11 +360,32 @@ export async function getSignedPdfUrlForSigning(signToken) {
 
 // ── PDF Storage ──
 
+// Browser-computed SHA-256. The cron worker recomputes from the stored bytes
+// before writing the certificate, so this is a fast-path hint, not a security claim.
+async function sha256HexFromFile(file) {
+  const buf = await file.arrayBuffer();
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(hash))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export async function uploadPdf(userId, file) {
   const path = `${userId}/${crypto.randomUUID()}.pdf`;
+  const sha256 = await sha256HexFromFile(file);
   const { error } = await supabase.storage.from("pdfs").upload(path, file);
   if (error) throw error;
-  return path;
+  return { path, sha256 };
+}
+
+// Upload a PDF directly into the template-owned namespace (used by standalone
+// template creation; envelope-derived templates use copyPdfForTemplate instead).
+export async function uploadPdfForTemplate(userId, file) {
+  const path = `templates/${userId}/${crypto.randomUUID()}.pdf`;
+  const sha256 = await sha256HexFromFile(file);
+  const { error } = await supabase.storage.from("pdfs").upload(path, file);
+  if (error) throw error;
+  return { path, sha256 };
 }
 
 export async function getPdfUrl(path) {
@@ -302,4 +397,35 @@ export async function getSignedPdfUrl(path) {
   const { data, error } = await supabase.storage.from("pdfs").createSignedUrl(path, 3600);
   if (error) throw error;
   return data.signedUrl;
+}
+
+// ── Final document & certificate download ──
+
+async function fetchDownloadUrl(endpoint, envelopeId, signToken) {
+  const params = new URLSearchParams({ envelope_id: envelopeId });
+  if (signToken) params.set("sign_token", signToken);
+
+  const headers = {};
+  if (!signToken) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+  }
+
+  const res = await fetch(`${endpoint}?${params}`, { headers });
+  if (res.status === 425) {
+    const err = new Error("not_ready");
+    err.status = 425;
+    throw err;
+  }
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  const { url } = await res.json();
+  return url;
+}
+
+export async function fetchSignedDocumentUrl(envelopeId, signToken) {
+  return fetchDownloadUrl("/api/download-signed-document", envelopeId, signToken);
+}
+
+export async function fetchCertificateUrl(envelopeId, signToken) {
+  return fetchDownloadUrl("/api/download-certificate", envelopeId, signToken);
 }

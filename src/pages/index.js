@@ -1,4 +1,7 @@
+export { Landing } from "./Landing";
 export { Dashboard } from "./Dashboard";
+export { Settings } from "./Settings";
+export { TemplateNew } from "./TemplateNew";
 export { Templates } from "./Templates";
 export { NewEnvelope } from "./NewEnvelope";
 export { Detail } from "./Detail";

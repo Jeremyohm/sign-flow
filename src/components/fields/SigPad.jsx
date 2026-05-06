@@ -13,7 +13,7 @@ export function SigPad({ onCapture, onClear }) {
     const dpr = window.devicePixelRatio || 1; const r = c.getBoundingClientRect();
     c.width = r.width * dpr; c.height = r.height * dpr;
     const ctx = c.getContext("2d"); ctx.scale(dpr, dpr);
-    ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = T.ink; ctx.lineWidth = 2;
+    ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = T.text; ctx.lineWidth = 2;
   }, []);
   const pos = e => { const r = cRef.current.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; };
   const start = e => { e.preventDefault(); setDr(true); last.current = pos(e); };

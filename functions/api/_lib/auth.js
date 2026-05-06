@@ -20,7 +20,7 @@ async function hmacSha256(secret, message) {
 
 // Hash an API key for storage/lookup
 export async function hashApiKey(key, env) {
-  return hmacSha256(env.API_KEY_SECRET || "legacy-sign-secret", key);
+  return hmacSha256(env.API_KEY_SECRET || "sign-flow-secret", key);
 }
 
 // Generate a random hex string (Workers-compatible)
@@ -28,6 +28,28 @@ export function randomHex(bytes) {
   const arr = new Uint8Array(bytes);
   crypto.getRandomValues(arr);
   return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Constant-time string comparison. Returns false fast on length mismatch but still
+// XORs the shorter buffer to keep timing roughly stable.
+function timingSafeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const enc = new TextEncoder();
+  const aBytes = enc.encode(a);
+  const bBytes = enc.encode(b);
+  if (aBytes.length !== bBytes.length) {
+    let dummy = 0;
+    for (let i = 0; i < aBytes.length; i++) dummy |= aBytes[i];
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < aBytes.length; i++) diff |= aBytes[i] ^ bBytes[i];
+  return diff === 0;
+}
+
+// Derive the stored prefix shape: matches keys.js (rawKey.slice(0, 16) + "...").
+function apiKeyPrefix(rawKey) {
+  return rawKey.slice(0, 16) + "...";
 }
 
 // Validate API key from Authorization header, return user context
@@ -38,16 +60,54 @@ export async function authenticateRequest(request, env) {
   // Try API key auth: "Bearer sf_live_..."
   if (authHeader.startsWith("Bearer sf_")) {
     const key = authHeader.slice(7);
-    const keyHash = await hashApiKey(key, env);
+    const providedHash = await hashApiKey(key, env);
+    const prefix = apiKeyPrefix(key);
 
-    const { data, error } = await supabase.rpc("validate_api_key", { p_key_hash: keyHash });
-    if (error || !data) {
+    // Lookup candidates by prefix (service role bypasses RLS), then compare hashes
+    // in constant time to avoid leaking which keys exist via timing.
+    const { data: candidates, error: lookupError } = await supabase
+      .from("api_keys")
+      .select("id, user_id, scopes, key_hash")
+      .eq("key_prefix", prefix)
+      .is("revoked_at", null);
+
+    if (lookupError) {
       return { error: "Invalid API key", status: 401 };
     }
-    if (!data.api_access) {
+
+    let matched = null;
+    for (const cand of (candidates || [])) {
+      if (timingSafeEqual(providedHash, cand.key_hash)) {
+        matched = cand;
+        break;
+      }
+    }
+    if (!matched) {
+      return { error: "Invalid API key", status: 401 };
+    }
+
+    // Update last_used_at (non-blocking) and pull the subscription separately.
+    supabase.from("api_keys").update({ last_used_at: new Date().toISOString() })
+      .eq("id", matched.id).then(() => {}, () => {});
+
+    const { data: sub } = await supabase
+      .from("subscriptions").select("plan, api_access, envelope_limit, envelopes_used")
+      .eq("user_id", matched.user_id).single();
+
+    const user = {
+      user_id: matched.user_id,
+      key_id: matched.id,
+      scopes: matched.scopes,
+      plan: sub?.plan || "free",
+      api_access: !!sub?.api_access,
+      envelope_limit: sub?.envelope_limit ?? 5,
+      envelopes_used: sub?.envelopes_used ?? 0,
+    };
+
+    if (!user.api_access) {
       return { error: "API access requires a Pro or Business plan.", status: 403 };
     }
-    return { user: data, supabase };
+    return { user, supabase };
   }
 
   // Try Supabase JWT auth: "Bearer eyJ..."
@@ -87,12 +147,8 @@ export async function logUsage(supabase, userId, keyId, endpoint, method, status
   }
 }
 
-// HMAC signature for webhook payloads
-export async function signPayload(payload, secret) {
-  return hmacSha256(secret, JSON.stringify(payload));
-}
-
-// Dispatch webhook events to all matching subscribers
+// Dispatch webhook events by enqueuing into webhook_retry_queue. The cron worker
+// handles delivery, exponential backoff, and dead-letter after MAX_ATTEMPTS.
 export async function dispatchWebhooks(supabase, userId, event, payload) {
   try {
     const { data: webhooks } = await supabase.rpc("get_active_webhooks", {
@@ -101,55 +157,16 @@ export async function dispatchWebhooks(supabase, userId, event, payload) {
     });
     if (!webhooks || webhooks.length === 0) return;
 
-    const deliveries = webhooks.map(async (wh) => {
-      const body = { event, timestamp: new Date().toISOString(), data: payload };
-      const signature = await signPayload(body, wh.secret);
+    const body = { event, timestamp: new Date().toISOString(), data: payload };
+    const rows = webhooks.map((wh) => ({
+      webhook_id: wh.id,
+      event,
+      payload: body,
+      next_attempt_at: new Date().toISOString(),
+    }));
 
-      try {
-        const response = await fetch(wh.url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-LegacySign-Signature": signature,
-            "X-LegacySign-Event": event,
-          },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(10000),
-        });
-
-        await supabase.from("webhook_deliveries").insert({
-          webhook_id: wh.id,
-          event,
-          payload: body,
-          response_status: response.status,
-          success: response.ok,
-        });
-
-        if (!response.ok) {
-          await supabase.from("webhooks")
-            .update({ failure_count: wh.failure_count + 1 })
-            .eq("id", wh.id);
-        } else {
-          await supabase.from("webhooks")
-            .update({ last_triggered_at: new Date().toISOString(), failure_count: 0 })
-            .eq("id", wh.id);
-        }
-      } catch (err) {
-        await supabase.from("webhook_deliveries").insert({
-          webhook_id: wh.id,
-          event,
-          payload: body,
-          response_status: 0,
-          response_body: err.message,
-          success: false,
-        });
-        await supabase.from("webhooks")
-          .update({ failure_count: wh.failure_count + 1 })
-          .eq("id", wh.id);
-      }
-    });
-
-    await Promise.allSettled(deliveries);
+    const { error } = await supabase.from("webhook_retry_queue").insert(rows);
+    if (error) console.error("Webhook enqueue error:", error);
   } catch (e) {
     console.error("Webhook dispatch error:", e);
   }

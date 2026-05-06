@@ -1,4 +1,5 @@
 export { Ic, I } from "./Icons";
+export { LogoMark } from "./LogoMark";
 export { Btn } from "./Btn";
 export { Badge } from "./Badge";
 export { Card } from "./Card";

@@ -53,13 +53,24 @@ export async function onRequest(context) {
     if (request.method === "POST") {
       if (!hasScope(user, "envelopes.write")) return Response.json({ error: "Insufficient scope" }, { status: 403, headers: corsHeaders() });
 
-      if (user.plan !== "owner" && user.envelopes_used >= user.envelope_limit) {
-        return Response.json({ error: `Envelope limit reached (${user.envelope_limit}/month). Upgrade your plan.` }, { status: 429, headers: corsHeaders() });
-      }
-
       const body = await request.json();
       const { name, routing = "sequential", pages = 1, signers = [], template_id } = body;
       if (!name) return Response.json({ error: "name is required" }, { status: 400, headers: corsHeaders() });
+
+      // Atomic plan limit enforcement (skips for "owner" plan = JWT-authenticated app users).
+      // Increment BEFORE envelope creation: if creation later fails, the count is bumped
+      // without a record. Acceptable tradeoff — under-counting would let users exceed quota.
+      if (user.plan !== "owner") {
+        const { data: newUsage, error: incError } = await supabase.rpc("try_increment_envelope_usage", {
+          p_user_id: userId,
+        });
+        if (incError) {
+          return Response.json({ error: "limit_check_failed", detail: incError.message }, { status: 500, headers: corsHeaders() });
+        }
+        if (newUsage === null) {
+          return Response.json({ error: `Envelope limit reached (${user.envelope_limit}/month). Upgrade your plan.` }, { status: 429, headers: corsHeaders() });
+        }
+      }
 
       const { data: envelope, error } = await supabase
         .from("envelopes").insert({ user_id: userId, name, routing, pages }).select().single();
@@ -100,7 +111,6 @@ export async function onRequest(context) {
         }
       }
 
-      await supabase.from("subscriptions").update({ envelopes_used: user.envelopes_used + 1 }).eq("user_id", userId);
       await logUsage(supabase, userId, user.key_id, "/v1/envelopes", "POST", 201);
       await dispatchWebhooks(supabase, userId, "envelope.created", { envelope: formatEnvelope(envelope) });
 

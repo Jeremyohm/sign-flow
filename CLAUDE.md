@@ -1,4 +1,4 @@
-# Legacy Sign — Claude Code Context
+# Sign Flow — Claude Code Context
 
 ## What This Project Does
 
@@ -12,7 +12,7 @@ Electronic document signing platform for real estate transactions. Upload PDFs, 
 
 - **Frontend:** React 19 + Vite → built to `dist/`, deployed to Cloudflare Pages
 - **API:** Cloudflare Pages Functions in `functions/` directory (file-based routing)
-- **Database:** Supabase (project: Legacy Sign, org: Intellismart, ID: `zewqivrmcgyrztlutrtr`)
+- **Database:** Supabase (project: Sign Flow, org: Intellismart, ID: `zewqivrmcgyrztlutrtr`)
 - **Proxy:** Cornerstone main router proxies `/it/legacy-sign/*` → `tlh-legacy-sign.pages.dev`
 
 ## Key Files

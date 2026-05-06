@@ -2,14 +2,14 @@ import { useState, useEffect, useCallback, createContext, useContext } from "rea
 import { Routes, Route, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { T as LightT, F } from "./theme";
 import { signingUrl, usePersistedState } from "./utils";
-import { Ic, I } from "./components/ui";
 import { useAuth } from "./lib/AuthContext";
 import * as db from "./lib/db";
 import {
-  Dashboard, Templates, NewEnvelope, Detail, Prepare, Sign, Notifications,
-  Login, Signup, ForgotPassword, ResetPassword,
+  Landing, Dashboard, Templates, NewEnvelope, Detail, Prepare, Sign, Notifications,
+  Login, Signup, ForgotPassword, ResetPassword, Settings, TemplateNew,
 } from "./pages";
-// VA Benefits removed from TLT version (personal only)
+import { AppShell } from "./components/app";
+import { TemplateEditor } from "./components/editor/TemplateEditor";
 
 const DARK = {
   bg: "#0F1A1F", bgWarm: "#162025", surface: "#1C2A30", surfaceAlt: "#233238",
@@ -22,7 +22,7 @@ const DARK = {
   error: "#D05A4B", errorSoft: "rgba(208,90,75,0.12)",
   purple: "#4B7EAE", purpleSoft: "rgba(75,126,174,0.12)",
   text: "#E4ECF0", textSec: "#9AABB8", textDim: "#6A7E8A",
-  white: "#FFFFFF", ink: "#E4ECF0",
+  white: "#FFFFFF",
   shadow: "0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.15)",
   shadowMd: "0 4px 12px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.2)",
   shadowLg: "0 10px 30px rgba(0,0,0,0.3), 0 2px 8px rgba(0,0,0,0.15)",
@@ -48,7 +48,7 @@ function LoadingScreen() {
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, loading: authLoading, signOut } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [dark, setDark] = usePersistedState("sf_dark", false);
   const T = dark ? { ...LightT, ...DARK } : LightT;
   const toggle = useCallback(() => setDark(d => !d), [setDark]);
@@ -61,9 +61,15 @@ export default function App() {
   const [notif, setNotif] = useState(null);
   const notify = (msg, type = "success") => { setNotif({ msg, type }); setTimeout(() => setNotif(null), 3000); };
 
-  // Load data from Supabase when user logs in
+  // Load data from Supabase when user logs in; clear cached state on sign-out.
   useEffect(() => {
-    if (!user) { setDataLoading(false); return; }
+    if (!user) {
+      setEnvelopes([]);
+      setTemplates([]);
+      setEmails([]);
+      setDataLoading(false);
+      return;
+    }
     let cancelled = false;
     async function load() {
       try {
@@ -146,38 +152,31 @@ export default function App() {
     };
     setEmails(p => [localEmail, ...p]);
 
-    // Actually send via Postmark
+    // Queue the email; the cron worker will drain the outbox and call Postmark.
     try {
       const res = await fetch("/api/send-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          envelopeId: envelope.id,
+          signerId: signer.id,
+          signToken: signer.sign_token,
           to: signer.email, toName: signer.name || "Signer",
           subject, signingUrl: url, envelopeName: envelope.name, type,
           hasAccessCode: !!(signer.access_code_hash || signer.has_access_code || signer.accessCode),
         }),
       });
-      if (res.ok) {
-        await db.updateEmail(emailRecord.id, { status: "delivered", delivered_at: new Date().toISOString() });
-        setEmails(p => p.map(e => e.id === emailRecord.id ? { ...e, status: "delivered", deliveredAt: new Date().toISOString() } : e));
-      } else {
+      if (!res.ok) {
         await db.updateEmail(emailRecord.id, { status: "bounced" });
         setEmails(p => p.map(e => e.id === emailRecord.id ? { ...e, status: "bounced" } : e));
       }
+      // status stays "sending" until the worker actually delivers.
     } catch (err) {
-      console.error("Email send error:", err);
+      console.error("Email queue error:", err);
       await db.updateEmail(emailRecord.id, { status: "bounced" });
       setEmails(p => p.map(e => e.id === emailRecord.id ? { ...e, status: "bounced" } : e));
     }
     return localEmail;
-  };
-
-  const handleSignOut = async () => {
-    await signOut();
-    setEnvelopes([]);
-    setTemplates([]);
-    setEmails([]);
-    navigate("/login");
   };
 
   // Show loading while auth is resolving
@@ -188,14 +187,10 @@ export default function App() {
     location.pathname === "/login" || location.pathname === "/signup" ||
     location.pathname === "/forgot-password" || location.pathname === "/reset-password";
 
-  const activeTab = location.pathname === "/templates" ? "templates"
-    : location.pathname === "/emails" ? "emails"
-    : "documents";
-
   return (
     <ThemeCtx.Provider value={{ dark, toggle, T }}>
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: F.body, color: T.text, transition: "background 0.3s, color 0.3s" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&family=Montserrat:wght@400;500;600&family=Caveat:wght@400;500;600;700&display=swap" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&family=Montserrat:wght@400;500;600&family=Caveat:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
       {/* Toast */}
       {notif && <div style={{ position: "fixed", top: 16, right: 16, zIndex: 999,
         background: notif.type === "success" ? T.successSoft : T.warningSoft,
@@ -203,51 +198,14 @@ export default function App() {
         border: `1px solid ${notif.type === "success" ? T.success : T.warning}22`,
         borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 600,
         boxShadow: T.shadowMd, animation: "slideIn 0.25s ease" }}>{notif.msg}</div>}
-      {/* Nav — only show when logged in and not on public routes */}
-      {user && !isPublicRoute && (
-        <nav className="sf-nav" style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "0 24px",
-          display: "flex", alignItems: "center", height: 56, justifyContent: "space-between", boxShadow: T.shadow }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, cursor: "pointer" }} onClick={() => navigate("/")}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, background: T.accentSoft,
-              display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Ic d={I.shield} size={16} color={T.accent} s />
-            </div>
-            <span className="sf-brand" style={{ fontSize: 15, fontWeight: 700, color: T.text, letterSpacing: -0.3 }}>Legacy Sign</span>
-          </div>
-          <div className="sf-tabs" style={{ display: "flex", gap: 2 }}>
-            {[{ id: "documents", path: "/", label: "Documents", icon: I.doc }, { id: "templates", path: "/templates", label: "Templates", icon: I.tmpl }, { id: "emails", path: "/emails", label: "Emails", icon: I.mail }].map(tab => (
-              <button key={tab.id} onClick={() => navigate(tab.path)} style={{
-                padding: "7px 14px", borderRadius: 7, border: "none", display: "flex", alignItems: "center", gap: 6,
-                background: activeTab === tab.id ? T.accentSoft : "transparent",
-                color: activeTab === tab.id ? T.accent : T.textSec,
-                fontSize: 13, fontWeight: 600, fontFamily: F.body, cursor: "pointer", transition: "all 0.15s",
-                position: "relative",
-              }}>
-                <Ic d={tab.icon} size={14} color="currentColor" s />
-                <span className="sf-tab-label">{tab.label}</span>
-                {tab.id === "emails" && emails.filter(e => e.status === "sending").length > 0 && (
-                  <span style={{ position: "absolute", top: 2, right: 2, width: 7, height: 7, borderRadius: "50%", background: T.warm }} />
-                )}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            <span style={{ fontSize: 11, color: T.textDim, marginRight: 8 }}>{user.email}</span>
-            <button onClick={toggle} title={dark ? "Light mode" : "Dark mode"}
-              style={{ padding: 6, borderRadius: 6, border: "none", background: "transparent",
-                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Ic d={dark ? "M12 3a9 9 0 109 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 01-4.4 2.26 5.4 5.4 0 01-3.14-9.8A9.06 9.06 0 0012 3z" : "M12 2a1 1 0 011 1v1a1 1 0 01-2 0V3a1 1 0 011-1zm0 15a5 5 0 100-10 5 5 0 000 10zm9-4h1a1 1 0 010 2h-1a1 1 0 010-2zM3 11h-1a1 1 0 010 2h1a1 1 0 010-2zm16.07-7.07a1 1 0 010 1.42l-.7.7a1 1 0 01-1.42-1.42l.7-.7a1 1 0 011.42 0zM6.05 17.66a1 1 0 010 1.41l-.7.71a1 1 0 01-1.42-1.42l.71-.7a1 1 0 011.41 0zm12.02.71a1 1 0 01-1.41 0l-.71-.71a1 1 0 011.42-1.41l.7.7a1 1 0 010 1.42zM4.93 6.05a1 1 0 01-1.42 0l-.7-.71a1 1 0 011.41-1.41l.71.7a1 1 0 010 1.42zM12 19a1 1 0 011 1v1a1 1 0 01-2 0v-1a1 1 0 011-1z"} size={16} color={T.textDim} s />
-            </button>
-            <button onClick={handleSignOut} title="Sign out"
-              style={{ padding: 6, borderRadius: 6, border: "none", background: "transparent",
-                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Ic d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4 M16 17l5-5-5-5 M21 12H9" size={16} color={T.textDim} s />
-            </button>
-          </div>
-        </nav>
-      )}
       {/* Routes */}
       <Routes>
+        {/* Root: Landing for guests, Dashboard (in AppShell) for users */}
+        <Route path="/" element={
+          !user ? <Landing />
+            : dataLoading ? <LoadingScreen />
+            : <AppShell><Dashboard envelopes={envelopes} setEnvelopes={setEnvelopes} notify={notify} /></AppShell>
+        } />
         {/* Public routes */}
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/signup" element={user ? <Navigate to="/" replace /> : <Signup />} />
@@ -263,52 +221,106 @@ export default function App() {
           <Route path="*" element={<LoadingScreen />} />
         ) : (
           <>
-            <Route path="/" element={
-              <Dashboard envelopes={envelopes} setEnvelopes={setEnvelopes} notify={notify} />
-            } />
             <Route path="/templates" element={
-              <Templates templates={templates} setTemplates={setTemplates} notify={notify} />
+              <AppShell><Templates templates={templates} setTemplates={setTemplates} notify={notify} /></AppShell>
+            } />
+            <Route path="/templates/new" element={
+              <AppShell><TemplateNew /></AppShell>
+            } />
+            <Route path="/templates/new/place" element={
+              <TemplateEditor mode="create" templates={templates} setTemplates={setTemplates} notify={notify} />
+            } />
+            <Route path="/templates/:id/edit" element={
+              <TemplateEditor mode="edit" templates={templates} setTemplates={setTemplates} notify={notify} />
             } />
             <Route path="/emails" element={
-              <Notifications emails={emails} />
+              <AppShell><Notifications emails={emails} /></AppShell>
+            } />
+            <Route path="/settings" element={
+              <AppShell><Settings /></AppShell>
             } />
             <Route path="/new" element={
+              <AppShell>
               <NewEnvelope templates={templates}
                 onCreate={async (env) => {
                   try {
-                    // Upload PDF to Supabase Storage if present
                     let pdfUrl = null;
-                    if (env.pdfFile) {
+                    let pdfHash = null;
+
+                    if (env.template) {
+                      // Template path: reuse the template's PDF + hash, no upload.
+                      pdfUrl = env.template.pdf_url || null;
+                      pdfHash = env.template.original_pdf_sha256 || null;
+                    } else if (env.pdfFile) {
                       try {
-                        const path = await db.uploadPdf(user.id, env.pdfFile);
-                        pdfUrl = path;
+                        const result = await db.uploadPdf(user.id, env.pdfFile);
+                        pdfUrl = result.path;
+                        pdfHash = result.sha256;
                       } catch (uploadErr) {
                         console.warn("PDF upload failed, continuing without:", uploadErr);
                       }
                     }
+
                     const created = await db.createEnvelope(user.id, {
-                      name: env.name, pages: env.pages, routing: env.routing, pdfUrl,
+                      name: env.name, pages: env.pages, routing: env.routing,
+                      pdfUrl, original_pdf_sha256: pdfHash,
+                      expires_at: env.expires_at || null,
                     });
                     // Create signers if any
                     let signers = [];
                     if (env.signers && env.signers.length > 0) {
                       signers = await db.createSigners(created.id, env.signers);
                     }
+
+                    // If this envelope was created from a template, copy the
+                    // template's field placements into the new envelope. The
+                    // template stores fields with role_index; map that to the
+                    // newly-created signer at the same sort_order (signer-type
+                    // recipients only).
+                    let createdFields = [];
+                    if (env.template?.fields?.length > 0 && signers.length > 0) {
+                      const signerOnly = signers.filter(s => (s.recipient_type || "signer") !== "cc")
+                        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+                      const fieldsToInsert = env.template.fields.map(f => ({
+                        signer_id: signerOnly[f.role_index]?.id || signerOnly[0]?.id || null,
+                        type: f.type,
+                        page: f.page ?? 0,
+                        x: f.x, y: f.y, w: f.w, h: f.h,
+                        value: null,
+                      }));
+                      try {
+                        createdFields = await db.createFields(created.id, fieldsToInsert);
+                      } catch (e) {
+                        console.warn("Template field copy failed:", e);
+                      }
+
+                      // Bump the template's usage_count + last_used_at.
+                      try {
+                        const updated = await db.recordTemplateUse(env.template.id, env.template.usage_count);
+                        setTemplates(prev => prev.map(t => t.id === env.template.id
+                          ? { ...t, usage_count: updated.usage_count, usageCount: updated.usage_count, last_used_at: updated.last_used_at }
+                          : t));
+                      } catch (e) {
+                        console.warn("Template usage increment failed:", e);
+                      }
+                    }
+
                     const enriched = {
                       ...created,
                       signers: signers.map((s, i) => ({ ...s, sort_order: i })),
-                      fields: [],
+                      fields: createdFields,
                       pdfPages: env.pdfPages || null,
                       templateFields: env.templateFields || null,
                     };
                     setEnvelopes(p => [enriched, ...p]);
-                    notify("Envelope created");
+                    notify(env.template ? `Envelope created from template "${env.template.name || ""}"` : "Envelope created");
                     navigate(`/prepare/${created.id}`);
                   } catch (err) {
                     console.error("Create envelope error:", err);
                     notify("Failed to create envelope", "warning");
                   }
                 }} />
+              </AppShell>
             } />
             <Route path="/envelope/:id" element={
               <Detail envelopes={envelopes} setEnvelopes={setEnvelopes} notify={notify} sendEmail={sendEmail} emails={emails} />
@@ -342,3 +354,4 @@ export default function App() {
     </ThemeCtx.Provider>
   );
 }
+

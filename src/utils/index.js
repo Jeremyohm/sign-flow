@@ -5,8 +5,18 @@ export { useT } from "./useThemeColors";
 let _id = 100;
 export const uid = () => `id_${++_id}`;
 export const signingUrl = (idOrToken) => `${window.location.origin}/sign/${idOrToken}`;
-export const fd = d => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-export const ft = d => new Date(d).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+export const fd = d => {
+  if (!d) return "—";
+  const t = new Date(d);
+  if (isNaN(t.getTime())) return "—";
+  return t.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+};
+export const ft = d => {
+  if (!d) return "—";
+  const t = new Date(d);
+  if (isNaN(t.getTime())) return "—";
+  return t.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+};
 
 export function mkPage(n, tot, name) {
   const c = document.createElement("canvas"); c.width = 612; c.height = 792;

@@ -43,6 +43,26 @@ export function Detail({ envelopes, setEnvelopes, notify, sendEmail, emails }) {
           <div style={{ display: "flex", gap: 8 }}>
             {env.status === "draft" && <Btn onClick={() => navigate(`/prepare/${env.id}`)} variant="secondary">Prepare</Btn>}
             {(env.status === "sent" || env.status === "in_progress") && <Btn onClick={() => navigate(`/sign/${env.id}`)}>Sign Now</Btn>}
+            {env.status === "completed" && <>
+              <Btn variant="secondary" onClick={async () => {
+                try {
+                  const url = await db.fetchSignedDocumentUrl(env.id);
+                  window.location.href = url;
+                } catch (err) {
+                  if (err.status === 425) notify("Document still being generated", "warning");
+                  else notify("Download failed", "warning");
+                }
+              }}>Download Signed</Btn>
+              <Btn variant="secondary" onClick={async () => {
+                try {
+                  const url = await db.fetchCertificateUrl(env.id);
+                  window.location.href = url;
+                } catch (err) {
+                  if (err.status === 425) notify("Certificate still being generated", "warning");
+                  else notify("Download failed", "warning");
+                }
+              }}>Download Certificate</Btn>
+            </>}
             <Btn variant="danger" size="sm" onClick={() => setShowDelete(true)}><Ic d={I.trash} size={13} color={T.error} s /></Btn>
           </div>
         </div>
