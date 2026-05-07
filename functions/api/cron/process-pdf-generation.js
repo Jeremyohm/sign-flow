@@ -167,8 +167,10 @@ async function processJob(supabase, job, env) {
   const tokenById = new Map((tokenRows || []).map(r => [r.id, r.sign_token]));
 
   // Queue completion emails. Signers get a sign_token-gated download link;
-  // owner gets a dashboard pointer.
-  const appUrl = env.APP_URL || "";
+  // owner gets a dashboard pointer that takes them to /envelope/:id (where
+  // they sign in and download). Hard-code the prod URL as fallback so this
+  // doesn't silently produce empty/relative links if APP_URL is unset.
+  const appUrl = env.APP_URL || "https://sign-flow.pages.dev";
   const completionRows = [];
   for (const signer of (envData.signers || [])) {
     const signerSignToken = tokenById.get(signer.id) || null;
