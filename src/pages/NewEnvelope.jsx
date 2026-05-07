@@ -238,6 +238,19 @@ export function NewEnvelope({ templates = [], onCreate }) {
   const step3Valid = name.trim().length > 0;
   const canAdvance = step === 0 ? step1Valid : step === 1 ? step2Valid : step3Valid;
 
+  const disabledReason = useMemo(() => {
+    if (canAdvance) return undefined;
+    if (step === 0) return "Upload a PDF or pick a template to continue";
+    if (step === 1) {
+      const filled = recipients.filter(r => !rowIsEmpty(r));
+      if (filled.length === 0) return "Add at least one recipient";
+      if (!filled.every(r => r.name.trim() && emailValid(r.email))) return "Fix the highlighted recipient errors above";
+      if (!filled.some(r => r.recipient_type === "signer")) return "At least one recipient must be marked Needs to sign";
+      return "Fix the highlighted recipient errors above";
+    }
+    return "Give the envelope a name to continue";
+  }, [canAdvance, step, recipients]);
+
   function goNext() {
     if (!canAdvance || submitting) return;
     if (step < 2) { setStep(s => s + 1); return; }
@@ -386,6 +399,7 @@ export function NewEnvelope({ templates = [], onCreate }) {
         onAdvance={goNext}
         canAdvance={canAdvance}
         submitting={submitting}
+        disabledReason={disabledReason}
       />
     </div>
   );
@@ -748,6 +762,13 @@ function RecipientRow({ row, index, signerIndex, signOrder, canRemove, onChange,
   const isSigner = row.recipient_type === "signer";
   const showNumberBadge = isSigner && signOrder && signerIndex != null;
 
+  // Inline validation: only surface errors once the user has typed in this row,
+  // so empty/auto-added trailing rows stay quiet.
+  const hasContent   = !!(row.name.trim() || row.email.trim());
+  const nameError    = hasContent && !row.name.trim();
+  const emailMissing = hasContent && !row.email.trim();
+  const emailFormat  = hasContent && !!row.email.trim() && !emailValid(row.email);
+
   return (
     <div
       className={`ne-recipient-row ${over ? "is-drag-target" : ""}`}
@@ -827,23 +848,32 @@ function RecipientRow({ row, index, signerIndex, signOrder, canRemove, onChange,
             {row.roleName}
           </div>
         )}
-        <input
-          className="ne-input"
-          type="text"
-          placeholder={row.roleName ? `Person who will fill the ${row.roleName} role — name` : "Full name"}
-          value={row.name}
-          onChange={(e) => onChange({ name: e.target.value })}
-          style={inputStyle()}
-        />
-        <input
-          className="ne-input"
-          type="email"
-          placeholder="Email address"
-          value={row.email}
-          onChange={(e) => onChange({ email: e.target.value })}
-          onBlur={onAutoAdd}
-          style={inputStyle()}
-        />
+        <div>
+          <input
+            className="ne-input"
+            type="text"
+            placeholder={row.roleName ? `Person who will fill the ${row.roleName} role — name` : "Full name"}
+            value={row.name}
+            onChange={(e) => onChange({ name: e.target.value })}
+            style={{ ...inputStyle(), width: "100%", ...(nameError ? { borderColor: C.errorBorder } : {}) }}
+            aria-invalid={nameError || undefined}
+          />
+          {nameError && <FieldError>Name is required</FieldError>}
+        </div>
+        <div>
+          <input
+            className="ne-input"
+            type="email"
+            placeholder="Email address"
+            value={row.email}
+            onChange={(e) => onChange({ email: e.target.value })}
+            onBlur={onAutoAdd}
+            style={{ ...inputStyle(), width: "100%", ...((emailMissing || emailFormat) ? { borderColor: C.errorBorder } : {}) }}
+            aria-invalid={emailMissing || emailFormat || undefined}
+          />
+          {emailFormat && <FieldError>Enter a valid email address</FieldError>}
+          {emailMissing && !emailFormat && <FieldError>Email is required</FieldError>}
+        </div>
         <select
           className="ne-input"
           value={row.recipient_type}
@@ -1043,7 +1073,7 @@ function DetailsStep({
   );
 }
 
-function ActionBar({ showBack, onBack, ctaLabel, onAdvance, canAdvance, submitting }) {
+function ActionBar({ showBack, onBack, ctaLabel, onAdvance, canAdvance, submitting, disabledReason }) {
   return (
     <div
       className="ne-actionbar"
@@ -1083,6 +1113,7 @@ function ActionBar({ showBack, onBack, ctaLabel, onAdvance, canAdvance, submitti
         type="button"
         onClick={onAdvance}
         disabled={!canAdvance || submitting}
+        title={!canAdvance && !submitting ? disabledReason : undefined}
         className="ne-cta"
         style={{
           padding: "11px 20px",
@@ -1149,6 +1180,14 @@ function inputStyle() {
     fontFamily: FONT_SANS,
     transition: "border-color 140ms ease, box-shadow 140ms ease",
   };
+}
+
+function FieldError({ children }) {
+  return (
+    <div style={{ marginTop: 4, fontSize: 12, color: C.errorText, lineHeight: 1.3 }}>
+      {children}
+    </div>
+  );
 }
 
 function Spinner() {
