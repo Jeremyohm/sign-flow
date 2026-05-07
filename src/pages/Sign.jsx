@@ -29,6 +29,7 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
   const [sigData, setSigData] = useState(null);
   const [textInput, setTextInput] = useState("");
   const [pages, setPages] = useState([]);
+  const [pageSizes, setPageSizes] = useState({});
   const [error, setError] = useState(null);
 
   // Access code gate state
@@ -398,10 +399,22 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
                 </div>
               );
             }
+            // Editor stores field coords in the rendered image's pixel space (pdf.js
+            // scale=1.5, so US Letter ≈ 918×1188). Use the actual loaded image's
+            // natural dimensions to compute percentages; fall back to 918×1188.
+            const ps = pageSizes[pi] || { w: 918, h: 1188 };
             return (
               <div key={pi} style={{ marginBottom: 12, borderRadius: 8, overflow: "hidden",
                 border: `1px solid ${T.border}`, boxShadow: T.shadow, position: "relative" }}>
-                <img src={page} alt={`Page ${pi + 1}`} style={{ width: "100%", display: "block" }} />
+                <img src={page} alt={`Page ${pi + 1}`} style={{ width: "100%", display: "block" }}
+                  onLoad={e => {
+                    const img = e.currentTarget;
+                    if (img.naturalWidth && img.naturalHeight) {
+                      setPageSizes(prev => prev[pi]?.w === img.naturalWidth ? prev : ({
+                        ...prev, [pi]: { w: img.naturalWidth, h: img.naturalHeight },
+                      }));
+                    }
+                  }} />
                 {pageMyFields.map(field => {
                   const ftype = FTYPES.find(ft => ft.id === field.type);
                   const filled = fieldValues[field.id] || field.value;
@@ -411,8 +424,8 @@ export function Sign({ envelopes, notify, setEnvelopes }) {
                     <div key={field.id} onClick={() => !field.value && handleFieldClick(field)}
                       style={{
                         position: "absolute",
-                        left: `${(fx / 612) * 100}%`, top: `${(fy / 792) * 100}%`,
-                        width: `${(fw / 612) * 100}%`, height: `${(fh / 792) * 100}%`,
+                        left: `${(fx / ps.w) * 100}%`, top: `${(fy / ps.h) * 100}%`,
+                        width: `${(fw / ps.w) * 100}%`, height: `${(fh / ps.h) * 100}%`,
                         border: `2px ${filled ? "solid" : "dashed"} ${filled ? T.success : SC[pendingIdx % 3]}`,
                         borderRadius: 4,
                         background: filled ? `${T.success}15` : `${SC[pendingIdx % 3]}18`,
