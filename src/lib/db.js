@@ -358,6 +358,49 @@ export async function markAllNotificationsRead() {
   return data;
 }
 
+// ── Settings / Subscription ──
+
+export async function fetchSubscription() {
+  const { data, error } = await supabase.rpc("get_user_subscription");
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
+export async function updateDisplayName(displayName) {
+  const { data, error } = await supabase.auth.updateUser({
+    data: { display_name: displayName },
+  });
+  if (error) throw error;
+  return data.user;
+}
+
+async function postWithSession(path, body) {
+  const { data: sessRes } = await supabase.auth.getSession();
+  const token = sessRes?.session?.access_token;
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: token ? `Bearer ${token}` : "",
+    },
+    body: JSON.stringify(body || {}),
+  });
+  const text = await res.text();
+  let parsed = null;
+  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = { raw: text }; }
+  if (!res.ok) throw new Error(parsed?.error || text || `HTTP ${res.status}`);
+  return parsed;
+}
+
+export const createCheckoutSession = (plan) =>
+  postWithSession("/api/billing/create-checkout-session", { plan });
+
+export const createPortalSession = () =>
+  postWithSession("/api/billing/create-portal-session");
+
+export const deleteAccount = () =>
+  postWithSession("/api/account/delete");
+
 // ── Emails ──
 
 export async function fetchEmails(userId) {

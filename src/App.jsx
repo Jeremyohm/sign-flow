@@ -248,7 +248,7 @@ export default function App() {
               <AppShell><Notifications /></AppShell>
             } />
             <Route path="/settings" element={
-              <AppShell><Settings /></AppShell>
+              <AppShell><Settings notify={notify} /></AppShell>
             } />
             <Route path="/new" element={
               <AppShell>
