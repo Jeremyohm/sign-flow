@@ -24,6 +24,29 @@ function rangeLabel(rangeDays) {
   return `last ${rangeDays} days`;
 }
 
+// Map raw envelope statuses from the RPC ("completed", "sent", "in_progress",
+// "declined", "draft", etc.) into the user-facing donut buckets.
+function bucketStatuses(rows) {
+  const sums = { Completed: 0, "In progress": 0, "Voided/expired": 0, Draft: 0 };
+  for (const r of rows) {
+    const raw = (r.status || "").toLowerCase();
+    if (raw === "completed") sums.Completed += r.count || 0;
+    else if (raw === "sent" || raw === "in_progress" || raw === "pending") sums["In progress"] += r.count || 0;
+    else if (raw === "declined" || raw === "voided" || raw === "expired") sums["Voided/expired"] += r.count || 0;
+    else sums.Draft += r.count || 0;
+  }
+  return Object.entries(sums)
+    .filter(([, n]) => n > 0)
+    .map(([category, count]) => ({ category, count }));
+}
+
+// RPC doesn't expose its bucket choice anymore; mirror the same rule.
+function inferBucket(rangeDays) {
+  if (rangeDays === null) return "month";
+  if (rangeDays > 90) return "week";
+  return "day";
+}
+
 export function Reports() {
   useDocTitle("Reports");
   const navigate = useNavigate();
@@ -84,7 +107,9 @@ export function Reports() {
     );
   }
 
-  if (report && report.total_ever === 0) {
+  // The new RPC shape no longer returns total_ever; treat zero sent in
+  // "all time" as the brand-new-account case.
+  if (report && rangeDays === null && (report.sent_count || 0) === 0) {
     return (
       <div style={{ maxWidth: 1080, margin: "0 auto", padding: "32px 24px",
         fontFamily: FONT_SANS, color: C.ink }}>
@@ -94,12 +119,14 @@ export function Reports() {
     );
   }
 
-  const s = report?.stats || {};
+  const s = report || {};
   const completionRate = s.sent_count > 0 ? (s.completed_count / s.sent_count) * 100 : 0;
-  const prevCompletionRate = s.prev_sent_count > 0 ? (s.prev_completed_count / s.prev_sent_count) * 100 : null;
-  const showTrend = rangeDays !== null && (s.prev_sent_count || 0) > 0;
+  const prevCompletionRate = s.previous_sent_count > 0
+    ? (s.previous_completed_count / s.previous_sent_count) * 100 : null;
+  const showTrend = rangeDays !== null && (s.previous_sent_count || 0) > 0;
 
   const noActivity = (s.sent_count || 0) === 0;
+  const statusForDonut = bucketStatuses(s.status_breakdown || []);
 
   return (
     <div style={{ maxWidth: 1080, margin: "0 auto", padding: "32px 24px",
@@ -126,18 +153,17 @@ export function Reports() {
         <StatCard label="Completion rate" value={`${completionRate.toFixed(0)}%`}
           trend={showTrend && prevCompletionRate !== null
             ? trendFrom(completionRate, prevCompletionRate) : null} />
-        <StatCard label="Avg. time to sign" value={formatDuration(s.avg_seconds)}
-          trend={showTrend ? trendFromInverted(s.avg_seconds, s.prev_avg_seconds) : null} />
+        <StatCard label="Avg. time to sign" value={formatDuration(s.avg_seconds_to_sign)} />
       </div>
 
       <div style={{ marginBottom: 20 }}>
-        <VolumeChart data={report.volume} bucket={report.bucket} />
+        <VolumeChart data={s.volume_over_time} bucket={inferBucket(rangeDays)} />
       </div>
 
       <div className="reports-twocol" style={{ display: "grid", gap: 20,
         gridTemplateColumns: "1fr 1fr" }}>
-        <StatusDonut data={report.status_breakdown} />
-        <TopRecipientsList recipients={report.top_recipients} />
+        <StatusDonut data={statusForDonut} />
+        <TopRecipientsList recipients={s.top_recipients} />
       </div>
 
       <style>{`@media (max-width: 880px) { .reports-twocol { grid-template-columns: 1fr !important; } }`}</style>
