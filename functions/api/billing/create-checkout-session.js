@@ -38,7 +38,7 @@ export async function onRequestPost(context) {
 
   const Stripe = (await import("stripe")).default;
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
-  const appUrl = env.APP_URL || "https://sign-flow.pages.dev";
+  const appUrl = env.APP_URL || "https://sign-flow.net";
 
   // Reuse or create the Stripe customer for this user.
   const { data: sub } = await supabase.from("subscriptions")

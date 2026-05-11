@@ -25,7 +25,7 @@ export async function onRequestPost(context) {
 
   const Stripe = (await import("stripe")).default;
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
-  const appUrl = env.APP_URL || "https://sign-flow.pages.dev";
+  const appUrl = env.APP_URL || "https://sign-flow.net";
 
   try {
     const portal = await stripe.billingPortal.sessions.create({
