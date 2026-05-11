@@ -53,6 +53,16 @@ export async function mergePdfFields(pdfBytes, fieldValues) {
       }
 
       page.drawImage(img, { x: fieldX, y: pdfY, width: fieldW, height: fieldH });
+
+      if (field.type === "signature" && (field.signer_name || field.signed_at)) {
+        drawSignatureBlock(page, font, {
+          x: fieldX,
+          yTop: pdfY,
+          width: fieldW,
+          name: field.signer_name,
+          signedAt: field.signed_at,
+        });
+      }
       continue;
     }
 
@@ -158,4 +168,43 @@ function autoFontSize(font, text, maxW, maxH) {
     size -= 0.5;
   }
   return size;
+}
+
+function drawSignatureBlock(page, font, { x, yTop, width, name, signedAt }) {
+  const ruleY = yTop - 4;
+  page.drawLine({
+    start: { x, y: ruleY },
+    end: { x: x + width, y: ruleY },
+    thickness: 0.5,
+    color: rgb(0.612, 0.639, 0.686),
+  });
+
+  if (name) {
+    page.drawText(name, {
+      x,
+      y: ruleY - 11,
+      size: 9,
+      font,
+      color: rgb(0.122, 0.161, 0.216),
+    });
+  }
+
+  if (signedAt) {
+    page.drawText(`Signed ${formatSignedDate(signedAt)}`, {
+      x,
+      y: ruleY - 22,
+      size: 8,
+      font,
+      color: rgb(0.420, 0.447, 0.502),
+    });
+  }
+}
+
+function formatSignedDate(iso) {
+  const d = new Date(iso);
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
 }

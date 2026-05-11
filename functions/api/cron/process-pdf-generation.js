@@ -114,13 +114,20 @@ async function processJob(supabase, job, env) {
   // rendering is a known follow-up — see migration plan).
   const { data: fields, error: fieldsErr } = await supabase
     .from("fields")
-    .select("page,x,y,w,h,value")
+    .select("page,x,y,w,h,value,type,signer_id")
     .eq("envelope_id", job.envelope_id);
   if (fieldsErr) throw new Error(`Fields fetch failed: ${fieldsErr.message}`);
 
-  const fieldValues = (fields || []).filter(f => f.value != null).map(f => ({
-    page: f.page, x: f.x, y: f.y, w: f.w, h: f.h, value: f.value,
-  }));
+  const signerById = new Map((envData.signers || []).map(s => [s.id, s]));
+  const fieldValues = (fields || []).filter(f => f.value != null).map(f => {
+    const signer = signerById.get(f.signer_id);
+    return {
+      page: f.page, x: f.x, y: f.y, w: f.w, h: f.h, value: f.value,
+      type: f.type,
+      signer_name: signer?.name || signer?.email || "",
+      signed_at: signer?.signed_at || null,
+    };
+  });
 
   const signedPdfBytes = fieldValues.length > 0
     ? await mergePdfFields(pdfBytes, fieldValues)

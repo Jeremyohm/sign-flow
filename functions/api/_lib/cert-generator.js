@@ -16,7 +16,7 @@ const CONTENT_BOTTOM = MARGIN_BOTTOM + FOOTER_HEIGHT;
 const COLOR_TEXT = rgb(0.1, 0.1, 0.12);
 const COLOR_MUTED = rgb(0.45, 0.45, 0.5);
 const COLOR_RULE = rgb(0.85, 0.85, 0.88);
-const COLOR_ACCENT = rgb(0.15, 0.39, 0.92);
+const COLOR_ACCENT = rgb(0.118, 0.318, 0.157);
 
 /**
  * Generate a Certificate of Completion PDFDocument.
@@ -151,11 +151,22 @@ function newPage(ctx) {
   ctx.currentPage = page;
   ctx.cursorY = CONTENT_TOP;
 
-  // Wordmark in Fraunces top-left, then a thin rule under the header.
+  // Sign Flow brand: curve mark + Fraunces wordmark, both bottle green.
+  // SVG path is in a 32x20 viewBox; drawSvgPath anchors SVG (0,0) at (x,y)
+  // and y-flips internally so the curve renders right-side-up.
+  page.drawSvgPath(
+    "M2 14 C 4 12, 6 10, 9 13 C 12 16, 16 6, 20 8 C 24 10, 27 7, 30 4",
+    {
+      x: MARGIN_X,
+      y: PAGE_HEIGHT - MARGIN_TOP + 18,
+      borderColor: COLOR_ACCENT,
+      borderWidth: 2.2,
+    },
+  );
   page.drawText("Sign Flow", {
-    x: MARGIN_X,
-    y: PAGE_HEIGHT - MARGIN_TOP + 8,
-    size: 14,
+    x: MARGIN_X + 38,
+    y: PAGE_HEIGHT - MARGIN_TOP + 6,
+    size: 16,
     font: ctx.fonts.fraunces,
     color: COLOR_ACCENT,
   });
