@@ -1,9 +1,15 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
+// Editor renders pdf.js at scale 1.5 and stores field coords in those rendered
+// pixels (top-left origin). Convert back to PDF points before drawing.
+// See src/components/editor/DocumentCanvas.jsx:23-30 for the storage convention.
+const RENDER_SCALE = 1.5;
+
 /**
  * Merge field values into a PDF at specified coordinates.
  * fieldValues: [{ page, x, y, w, h, value }]
- * Coordinates: x/y from top-left of page (converted to PDF bottom-left origin internally).
+ * Coordinates are stored at 1.5× PDF-point scale, top-left origin; converted
+ * to PDF points and bottom-left origin before drawing.
  *
  * Values starting with "data:image/" are embedded as images (drawn signatures /
  * initials). Anything else is rendered as text.
@@ -17,9 +23,11 @@ export async function mergePdfFields(pdfBytes, fieldValues) {
     const page = pages[field.page || 0];
     if (!page) continue;
     const { height: ph } = page.getSize();
-    const fieldH = field.h || 14;
-    const fieldW = field.w || 150;
-    const pdfY = ph - (field.y || 0) - fieldH;
+    const fieldX = (field.x || 0) / RENDER_SCALE;
+    const fieldY = (field.y || 0) / RENDER_SCALE;
+    const fieldW = (field.w || 150) / RENDER_SCALE;
+    const fieldH = (field.h || 14) / RENDER_SCALE;
+    const pdfY = ph - fieldY - fieldH;
 
     const value = field.value;
 
@@ -44,13 +52,13 @@ export async function mergePdfFields(pdfBytes, fieldValues) {
         continue;
       }
 
-      page.drawImage(img, { x: field.x || 0, y: pdfY, width: fieldW, height: fieldH });
+      page.drawImage(img, { x: fieldX, y: pdfY, width: fieldW, height: fieldH });
       continue;
     }
 
     const fontSize = autoFontSize(font, value, fieldW, fieldH);
     page.drawText(String(value ?? ""), {
-      x: field.x || 0,
+      x: fieldX,
       y: pdfY + 2,
       size: fontSize,
       font,

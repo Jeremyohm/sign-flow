@@ -126,6 +126,12 @@ async function processJob(supabase, job, env) {
     ? await mergePdfFields(pdfBytes, fieldValues)
     : pdfBytes;
 
+  // Hash the signed document BEFORE generating/appending the cert so the cert
+  // can display this hash. The combined (signed+cert) hash would be self-
+  // referential; verifiers strip trailing cert pages and re-hash to check.
+  const signedHash = await sha256Hex(signedPdfBytes);
+  envData.envelope.final_pdf_sha256 = signedHash;
+
   const certPdf = await generateCertificate(envData);
   const certBytes = await certPdf.save();
 
@@ -135,8 +141,6 @@ async function processJob(supabase, job, env) {
   const certPages = await finalPdf.copyPages(certForMerge, certForMerge.getPageIndices());
   certPages.forEach(p => finalPdf.addPage(p));
   const finalBytes = await finalPdf.save();
-
-  const finalHash = await sha256Hex(finalBytes);
 
   const ownerId = envData.owner?.id;
   if (!ownerId) throw new Error("Owner id missing");
@@ -153,7 +157,7 @@ async function processJob(supabase, job, env) {
 
   await supabase.from("envelopes")
     .update({
-      final_pdf_sha256: finalHash,
+      final_pdf_sha256: signedHash,
       final_pdf_url: finalPath,
       certificate_pdf_url: certPath,
     })

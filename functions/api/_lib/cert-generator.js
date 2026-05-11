@@ -54,8 +54,8 @@ export async function generateCertificate(data) {
   ctx.cursorY -= 6;
   drawKeyValue(ctx, "Original PDF (SHA-256)",
     data.envelope.original_pdf_sha256 || "(unavailable)");
-  drawKeyValue(ctx, "Final PDF (SHA-256)",
-    data.envelope.final_pdf_sha256 || "(computed at finalization)");
+  drawKeyValue(ctx, "Signed Document (SHA-256)",
+    data.envelope.final_pdf_sha256 || "(unavailable)");
   ctx.cursorY -= 10;
 
   // Signers
