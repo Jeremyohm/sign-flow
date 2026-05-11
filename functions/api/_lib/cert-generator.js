@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { FRAUNCES_SEMIBOLD_B64, b64ToBytes } from "./fonts.js";
+import { LOGO_MARK_PNG_B64 } from "./logo-mark.js";
 
 // US Letter portrait (612x792 points)
 const PAGE_WIDTH = 612;
@@ -32,8 +33,9 @@ export async function generateCertificate(data) {
   const fraunces = await pdf.embedFont(b64ToBytes(FRAUNCES_SEMIBOLD_B64));
 
   const fonts = { regular: helvetica, semibold: helveticaBold, fraunces };
+  const logoMark = await pdf.embedPng(b64ToBytes(LOGO_MARK_PNG_B64));
 
-  const ctx = { pdf, fonts, pages: [], currentPage: null, cursorY: 0 };
+  const ctx = { pdf, fonts, logoMark, pages: [], currentPage: null, cursorY: 0 };
 
   newPage(ctx);
 
@@ -151,20 +153,18 @@ function newPage(ctx) {
   ctx.currentPage = page;
   ctx.cursorY = CONTENT_TOP;
 
-  // Sign Flow brand: curve mark + Fraunces wordmark, both bottle green.
-  // SVG path is in a 32x20 viewBox; drawSvgPath anchors SVG (0,0) at (x,y)
-  // and y-flips internally so the curve renders right-side-up.
-  page.drawSvgPath(
-    "M2 14 C 4 12, 6 10, 9 13 C 12 16, 16 6, 20 8 C 24 10, 27 7, 30 4",
-    {
-      x: MARGIN_X,
-      y: PAGE_HEIGHT - MARGIN_TOP + 18,
-      borderColor: COLOR_ACCENT,
-      borderWidth: 2.2,
-    },
-  );
+  // Sign Flow brand mark — pre-rendered from public/favicon.svg so the cert
+  // matches the favicon and in-app LogoMark exactly.
+  const markH = 22;
+  const markW = markH * (512 / 452);
+  page.drawImage(ctx.logoMark, {
+    x: MARGIN_X,
+    y: PAGE_HEIGHT - MARGIN_TOP - 2,
+    width: markW,
+    height: markH,
+  });
   page.drawText("Sign Flow", {
-    x: MARGIN_X + 38,
+    x: MARGIN_X + markW + 8,
     y: PAGE_HEIGHT - MARGIN_TOP + 6,
     size: 16,
     font: ctx.fonts.fraunces,
