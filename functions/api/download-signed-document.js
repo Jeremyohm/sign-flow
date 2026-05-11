@@ -72,7 +72,7 @@ export async function onRequestGet(context) {
 
   const { data: signed, error: signErr } = await supabase.storage
     .from("pdfs")
-    .createSignedUrl(envelope.final_pdf_url, 300);
+    .createSignedUrl(envelope.final_pdf_url, 86400);
 
   if (signErr || !signed) {
     return new Response(JSON.stringify({ error: "sign_url_failed" }), { status: 500, headers: corsHeaders });
