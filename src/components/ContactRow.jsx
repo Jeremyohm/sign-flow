@@ -22,7 +22,7 @@ function timeAgo(iso) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function ContactRow({ contact, onEdit, onHide }) {
+export function ContactRow({ contact, onEdit, onHide, isLast = false }) {
   const navigate = useNavigate();
   const [hover, setHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -36,7 +36,7 @@ export function ContactRow({ contact, onEdit, onHide }) {
       onMouseLeave={() => setHover(false)}
       style={{
         display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
-        borderBottom: `1px solid ${C.border}`,
+        borderBottom: isLast ? "none" : `1px solid ${C.border}`,
         background: hover ? C.paperHover : "transparent",
         cursor: "pointer", transition: "background 150ms ease",
       }}

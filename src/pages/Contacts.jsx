@@ -111,14 +111,14 @@ export function Contacts({ notify }) {
 
       {!loading && !error && contacts.length > 0 && (
         <>
-          <div style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12,
-            overflow: "hidden" }}>
+          <div style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12 }}>
             {slice.length === 0 ? (
               <div style={{ padding: 40, textAlign: "center", color: C.muted }}>
                 No contacts match "{query}"
               </div>
-            ) : slice.map(c => (
-              <ContactRow key={c.id} contact={c} onEdit={setEditing} onHide={handleHide} />
+            ) : slice.map((c, i) => (
+              <ContactRow key={c.id} contact={c} onEdit={setEditing} onHide={handleHide}
+                isLast={i === slice.length - 1} />
             ))}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
