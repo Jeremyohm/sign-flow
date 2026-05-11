@@ -237,7 +237,7 @@ export async function recordTemplateUse(id, currentUsageCount = 0) {
 // from an existing envelope — template gets its own copy so deleting the
 // envelope doesn't strand the template).
 export async function copyPdfForTemplate(sourcePath, userId) {
-  const targetPath = `templates/${userId}/${crypto.randomUUID()}.pdf`;
+  const targetPath = `${userId}/templates/${crypto.randomUUID()}.pdf`;
   // Download → re-upload. supabase.storage.move() would also work but it
   // moves rather than copies. The .copy() API is the right call.
   const { error } = await supabase.storage.from("pdfs").copy(sourcePath, targetPath);
@@ -381,7 +381,7 @@ export async function uploadPdf(userId, file) {
 // Upload a PDF directly into the template-owned namespace (used by standalone
 // template creation; envelope-derived templates use copyPdfForTemplate instead).
 export async function uploadPdfForTemplate(userId, file) {
-  const path = `templates/${userId}/${crypto.randomUUID()}.pdf`;
+  const path = `${userId}/templates/${crypto.randomUUID()}.pdf`;
   const sha256 = await sha256HexFromFile(file);
   const { error } = await supabase.storage.from("pdfs").upload(path, file);
   if (error) throw error;
