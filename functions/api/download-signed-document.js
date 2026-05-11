@@ -78,5 +78,12 @@ export async function onRequestGet(context) {
     return new Response(JSON.stringify({ error: "sign_url_failed" }), { status: 500, headers: corsHeaders });
   }
 
-  return new Response(JSON.stringify({ url: signed.signedUrl }), { status: 200, headers: corsHeaders });
+  // Content-type negotiation: dashboard fetch() asks for JSON; email-link
+  // clicks land here with a browser Accept header (text/html,...) and want
+  // a 302 to the signed URL so the PDF downloads directly.
+  const accept = request.headers.get("Accept") || "";
+  if (accept.includes("application/json")) {
+    return new Response(JSON.stringify({ url: signed.signedUrl }), { status: 200, headers: corsHeaders });
+  }
+  return Response.redirect(signed.signedUrl, 302);
 }
