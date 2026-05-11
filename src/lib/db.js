@@ -238,10 +238,29 @@ export async function recordTemplateUse(id, currentUsageCount = 0) {
 // envelope doesn't strand the template).
 export async function copyPdfForTemplate(sourcePath, userId) {
   const targetPath = `${userId}/templates/${crypto.randomUUID()}.pdf`;
-  // Download → re-upload. supabase.storage.move() would also work but it
-  // moves rather than copies. The .copy() API is the right call.
+
+  const sessionRes = await supabase.auth.getSession();
+  const userRes = await supabase.auth.getUser();
+  console.log("[saveTemplate.copy] diagnostic", {
+    bundleStamp: "TPL-DIAG-1",
+    sourcePath,
+    targetPath,
+    userIdArg: userId,
+    jwtUserId: userRes.data.user?.id ?? null,
+    sessionPresent: !!sessionRes.data.session,
+    idsMatch: (userRes.data.user?.id ?? null) === userId,
+  });
+
   const { error } = await supabase.storage.from("pdfs").copy(sourcePath, targetPath);
-  if (error) throw error;
+  if (error) {
+    console.error("[saveTemplate.copy] failed", {
+      message: error.message,
+      statusCode: error.statusCode,
+      error: error.error,
+      raw: error,
+    });
+    throw error;
+  }
   return targetPath;
 }
 
@@ -382,9 +401,29 @@ export async function uploadPdf(userId, file) {
 // template creation; envelope-derived templates use copyPdfForTemplate instead).
 export async function uploadPdfForTemplate(userId, file) {
   const path = `${userId}/templates/${crypto.randomUUID()}.pdf`;
+
+  const sessionRes = await supabase.auth.getSession();
+  const userRes = await supabase.auth.getUser();
+  console.log("[saveTemplate.upload] diagnostic", {
+    bundleStamp: "TPL-DIAG-1",
+    path,
+    userIdArg: userId,
+    jwtUserId: userRes.data.user?.id ?? null,
+    sessionPresent: !!sessionRes.data.session,
+    idsMatch: (userRes.data.user?.id ?? null) === userId,
+  });
+
   const sha256 = await sha256HexFromFile(file);
   const { error } = await supabase.storage.from("pdfs").upload(path, file);
-  if (error) throw error;
+  if (error) {
+    console.error("[saveTemplate.upload] failed", {
+      message: error.message,
+      statusCode: error.statusCode,
+      error: error.error,
+      raw: error,
+    });
+    throw error;
+  }
   return { path, sha256 };
 }
 
