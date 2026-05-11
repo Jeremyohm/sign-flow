@@ -401,6 +401,20 @@ export const createPortalSession = () =>
 export const deleteAccount = () =>
   postWithSession("/api/account/delete");
 
+// ── Tier limits / usage ──
+
+export async function fetchTierLimits() {
+  const { data, error } = await supabase.rpc("get_user_tier_limits");
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
+export async function fetchUsage() {
+  const { data, error } = await supabase.rpc("get_user_usage");
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
 // ── Emails ──
 
 export async function fetchEmails(userId) {

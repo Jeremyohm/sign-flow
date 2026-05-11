@@ -139,7 +139,16 @@ async function processJob(supabase, job, env) {
   const signedHash = await sha256Hex(signedPdfBytes);
   envData.envelope.final_pdf_sha256 = signedHash;
 
-  const certPdf = await generateCertificate(envData);
+  // Look up the owner's plan so the cert can render the "Powered by Sign Flow"
+  // footer only on free-tier envelopes.
+  const { data: planRow } = await supabase
+    .from("subscriptions")
+    .select("plan")
+    .eq("user_id", envData.envelope.user_id)
+    .maybeSingle();
+  const showBranding = (planRow?.plan || "free") === "free";
+
+  const certPdf = await generateCertificate(envData, { showBranding });
   const certBytes = await certPdf.save();
 
   // Append cert to signed document

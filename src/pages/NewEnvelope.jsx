@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useDocTitle } from "../utils";
 import { TemplatePickerModal } from "../components/TemplatePickerModal";
 import * as db from "../lib/db";
+import { useTierLimits } from "../lib/useTierLimits";
+import { UpgradePromptModal } from "../components/UpgradePromptModal";
 
 const C = {
   paper:       "#FAFAF7",
@@ -79,6 +81,9 @@ export function NewEnvelope({ templates = [], onCreate }) {
   const [searchParams] = useSearchParams();
   const preselectedTemplateId = searchParams.get("template");
   const preselectedContactId = searchParams.get("contact");
+
+  const tier = useTierLimits();
+  const [upgradeKind, setUpgradeKind] = useState(null);
 
   // ── State ──
   const [step, setStep] = useState(0);
@@ -238,6 +243,15 @@ export function NewEnvelope({ templates = [], onCreate }) {
     setRecipients(rs => (rs.length > 1 ? rs.filter(r => r.id !== id) : rs));
   }
   function addRecipient() {
+    // Free tier: cap signing recipients at 2. Block adding a new row when the
+    // current filled signers count is already at the limit.
+    if (tier.isFree) {
+      const signerCount = recipients.filter(r => !rowIsEmpty(r) && r.recipient_type === "signer").length;
+      if (!tier.canAddRecipient(signerCount)) {
+        setUpgradeKind("recipient");
+        return;
+      }
+    }
     setRecipients(rs => [...rs, { id: cryptoId(), name: "", email: "", recipient_type: "signer" }]);
   }
   function moveRecipient(fromIdx, toIdx) {
@@ -361,6 +375,16 @@ export function NewEnvelope({ templates = [], onCreate }) {
         .ne-link:hover { text-decoration: underline; }
       `}</style>
 
+      {tier.isFree && tier.envelopesRemaining === 0 && (
+        <div style={{ maxWidth: 780, margin: "16px auto 0", padding: "12px 16px",
+          background: "rgba(196,132,29,0.08)", border: "1px solid rgba(196,132,29,0.30)",
+          borderRadius: 10, fontSize: 13, color: C.ink,
+          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span>You've used all 3 envelopes this month on the Free plan.</span>
+          <a href="/settings?tab=billing&action=upgrade-pro" style={{ color: C.forest,
+            fontWeight: 600, textDecoration: "none" }}>Upgrade to Pro →</a>
+        </div>
+      )}
       <Stepper step={step} onJump={jumpTo} canAdvance={canAdvance} />
 
       {step === 0 && (
@@ -423,6 +447,11 @@ export function NewEnvelope({ templates = [], onCreate }) {
         submitting={submitting}
         disabledReason={disabledReason}
       />
+      {upgradeKind && (
+        <UpgradePromptModal kind={upgradeKind}
+          nextResetDate={tier.usage?.next_reset_date}
+          onClose={() => setUpgradeKind(null)} />
+      )}
     </div>
   );
 }

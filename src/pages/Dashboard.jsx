@@ -5,6 +5,7 @@ import { useDocTitle } from "../utils";
 import { LogoMark } from "../components/ui";
 import { DocumentRow, Zone } from "../components/app";
 import * as db from "../lib/db";
+import { useTierLimits } from "../lib/useTierLimits";
 
 const C = {
   ink:       "#0F1418",
@@ -63,6 +64,7 @@ export function Dashboard({ envelopes = [], notify }) {
   useDocTitle("Documents");
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isFree } = useTierLimits();
 
   const userEmail = user?.email?.toLowerCase() || "";
   const firstName = deriveFirstName(user);
@@ -292,6 +294,21 @@ export function Dashboard({ envelopes = [], notify }) {
             />
           ))}
         </Zone>
+      )}
+
+      {isFree && envelopes.some(e => {
+        const t = new Date(e.updated_at || e.updatedAt || e.created_at || e.createdAt).getTime();
+        return !isNaN(t) && t < Date.now() - 30 * 24 * 60 * 60 * 1000;
+      }) && (
+        <div style={{ marginTop: 32, padding: "12px 16px",
+          background: "rgba(196,132,29,0.06)", border: "1px solid rgba(196,132,29,0.25)",
+          borderRadius: 10, fontSize: 13, color: C.ink,
+          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span>Older envelopes are hidden after 30 days on the Free plan.</span>
+          <a href="/pricing" style={{ color: C.forest, fontWeight: 600, textDecoration: "none" }}>
+            Upgrade for full history →
+          </a>
+        </div>
       )}
 
       {/* 5. Footer link */}

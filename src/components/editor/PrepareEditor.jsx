@@ -8,6 +8,7 @@ import { PrepareSidebar } from "./PrepareSidebar";
 import { DocumentCanvas } from "./DocumentCanvas";
 import { colorForSignerIndex } from "./recipientColors";
 import { SaveTemplateModal } from "../SaveTemplateModal";
+import { UpgradePromptModal } from "../UpgradePromptModal";
 
 const C = {
   paper: "#FAFAF7",
@@ -48,6 +49,7 @@ export function PrepareEditor({ envelopes, notify, setEnvelopes, setTemplates, s
     typeof window !== "undefined" && window.innerWidth < MOBILE_BREAKPOINT,
   );
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [upgradeKind, setUpgradeKind] = useState(null);
 
   // ── Recipients (signers only — CCs filtered out, no fields to assign) ──
   const recipients = useMemo(() => {
@@ -268,6 +270,15 @@ export function PrepareEditor({ envelopes, notify, setEnvelopes, setTemplates, s
       navigate("/");
     } catch (err) {
       console.error("Send error:", err);
+      const msg = err?.message || "";
+      if (msg.includes("envelope_limit_reached")) {
+        setUpgradeKind("envelope");
+        return;
+      }
+      if (msg.includes("recipient_limit_reached")) {
+        setUpgradeKind("recipient");
+        return;
+      }
       notify?.("Failed to send envelope", "warning");
     }
   }
@@ -445,6 +456,11 @@ export function PrepareEditor({ envelopes, notify, setEnvelopes, setTemplates, s
           onCancel={() => setShowSaveTemplate(false)}
           onSave={handleConfirmSaveTemplate}
         />
+      )}
+
+      {/* Tier limit upgrade prompt */}
+      {upgradeKind && (
+        <UpgradePromptModal kind={upgradeKind} onClose={() => setUpgradeKind(null)} />
       )}
 
       {/* Onboarding overlay */}

@@ -24,7 +24,7 @@ const COLOR_ACCENT = rgb(0.118, 0.318, 0.157);
  * data: { envelope, owner, signers, consent_records, audit_events }
  *       (output of get_envelope_for_certificate RPC)
  */
-export async function generateCertificate(data) {
+export async function generateCertificate(data, { showBranding = false } = {}) {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
 
@@ -139,7 +139,7 @@ export async function generateCertificate(data) {
   // Footers (page numbers)
   const totalPages = ctx.pages.length;
   ctx.pages.forEach((page, i) => {
-    drawFooter(page, fonts, i + 1, totalPages, data.envelope.id);
+    drawFooter(page, fonts, i + 1, totalPages, data.envelope.id, showBranding);
   });
 
   return pdf;
@@ -234,12 +234,18 @@ function drawHorizontalRule(ctx) {
   ctx.cursorY -= 4;
 }
 
-function drawFooter(page, fonts, pageNum, totalPages, envelopeId) {
+function drawFooter(page, fonts, pageNum, totalPages, envelopeId, showBranding = false) {
   const text = `Page ${pageNum} of ${totalPages}  ·  Envelope ${String(envelopeId).slice(0, 8)}`;
   page.drawText(text, {
     x: MARGIN_X, y: MARGIN_BOTTOM - 4, size: 8,
     font: fonts.regular, color: COLOR_MUTED,
   });
+  if (showBranding) {
+    page.drawText("Powered by Sign Flow  ·  sign-flow.net", {
+      x: MARGIN_X, y: MARGIN_BOTTOM - 16, size: 7,
+      font: fonts.regular, color: COLOR_MUTED,
+    });
+  }
 }
 
 function formatTimestamp(iso) {

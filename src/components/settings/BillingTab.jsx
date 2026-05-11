@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import * as db from "../../lib/db";
+import { useTierLimits } from "../../lib/useTierLimits";
 import { CurrentPlanCard } from "./CurrentPlanCard";
 import { TierCompareTable } from "./TierCompareTable";
 
@@ -61,8 +62,37 @@ export function BillingTab({ notify }) {
 
   return (
     <div>
+      <UsageStrip />
       <CurrentPlanCard subscription={sub} notify={notify} />
       <TierCompareTable currentPlan={sub?.plan || "free"} notify={notify} />
+    </div>
+  );
+}
+
+function UsageStrip() {
+  const { isFree, limits, usage, loading } = useTierLimits();
+  if (loading || !isFree || !usage) return null;
+  const used = usage.envelopes_this_month || 0;
+  const cap = limits?.envelopes_per_month || 3;
+  const pct = Math.min(100, Math.round((used / cap) * 100));
+  const reset = usage.next_reset_date
+    ? new Date(usage.next_reset_date).toLocaleDateString("en-US",
+        { month: "long", day: "numeric" })
+    : null;
+  return (
+    <div style={{ background: "#fff", border: "1px solid #E0E0DC",
+      borderRadius: 12, padding: "16px 20px", marginBottom: 20,
+      fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <div style={{ display: "flex", justifyContent: "space-between",
+        alignItems: "center", marginBottom: 10, fontSize: 13, color: "#0F1418" }}>
+        <span><strong>{used}</strong> of {cap} envelopes used this month</span>
+        {reset && <span style={{ color: "#5A6168", fontSize: 12 }}>Resets {reset}</span>}
+      </div>
+      <div style={{ height: 6, background: "#E0E0DC", borderRadius: 4, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%",
+          background: pct >= 100 ? "#C4841D" : "#1E5128",
+          transition: "width 200ms ease" }} />
+      </div>
     </div>
   );
 }

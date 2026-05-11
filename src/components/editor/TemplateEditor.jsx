@@ -7,6 +7,7 @@ import * as db from "../../lib/db";
 import { TemplateSidebar } from "./TemplateSidebar";
 import { DocumentCanvas } from "./DocumentCanvas";
 import { colorForSignerIndex } from "./recipientColors";
+import { UpgradePromptModal } from "../UpgradePromptModal";
 
 const C = {
   paper: "#FAFAF7",
@@ -78,6 +79,7 @@ export function TemplateEditor({ templates = [], setTemplates, notify, mode = "c
     };
   }, [isEdit, routeTemplateId, templates, incoming]);
 
+  const [upgradeKind, setUpgradeKind] = useState(null);
   const [name, setName] = useState(initialState?.templateName || "");
   const [description, setDescription] = useState(initialState?.templateDescription || "");
   const [roles, setRoles] = useState(initialState?.roles || []);
@@ -337,7 +339,11 @@ export function TemplateEditor({ templates = [], setTemplates, notify, mode = "c
       navigate("/templates");
     } catch (err) {
       console.error("Save template failed:", err);
-      notify?.(err?.message || "Couldn't save template. Try again.", "warning");
+      if ((err?.message || "").includes("template_limit_reached")) {
+        setUpgradeKind("template");
+      } else {
+        notify?.(err?.message || "Couldn't save template. Try again.", "warning");
+      }
       setSaving(false);
     }
   }
@@ -441,6 +447,9 @@ export function TemplateEditor({ templates = [], setTemplates, notify, mode = "c
           onDuplicateField={handleDuplicateField}
         />
       </div>
+      {upgradeKind && (
+        <UpgradePromptModal kind={upgradeKind} onClose={() => setUpgradeKind(null)} />
+      )}
     </div>
   );
 }
