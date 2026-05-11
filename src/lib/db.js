@@ -329,6 +329,35 @@ export async function fetchReports(rangeDays) {
   return data;
 }
 
+// ── Notifications ──
+
+export async function fetchNotifications({ onlyUnread = false, limit = 50 } = {}) {
+  const { data, error } = await supabase.rpc("get_notifications_for_user", {
+    p_only_unread: onlyUnread, p_limit: limit,
+  });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getUnreadNotificationCount() {
+  const { data, error } = await supabase.rpc("get_unread_notification_count");
+  if (error) throw error;
+  return data || 0;
+}
+
+export async function markNotificationRead(id) {
+  const { error } = await supabase.from("notifications")
+    .update({ is_read: true, read_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function markAllNotificationsRead() {
+  const { data, error } = await supabase.rpc("mark_all_notifications_read");
+  if (error) throw error;
+  return data;
+}
+
 // ── Emails ──
 
 export async function fetchEmails(userId) {

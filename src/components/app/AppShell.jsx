@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../lib/AuthContext";
 import { LogoMark } from "../ui";
 import { Ic, I } from "../ui";
+import { NotificationBell } from "../NotificationBell";
 
 const C = {
   paper:     "#FAFAF7",
@@ -20,11 +21,12 @@ const FONT_SERIF = "'Fraunces', Georgia, serif";
 const FONT_SANS  = "'Inter', system-ui, sans-serif";
 
 const NAV_ITEMS = [
-  { id: "documents", path: "/",          label: "Documents", icon: I.doc   },
-  { id: "templates", path: "/templates", label: "Templates", icon: I.tmpl  },
-  { id: "contacts",  path: "/contacts",  label: "Contacts",  icon: I.user  },
-  { id: "reports",   path: "/reports",   label: "Reports",   icon: I.chart },
-  { id: "settings",  path: "/settings",  label: "Settings",  icon: I.lock  },
+  { id: "documents",     path: "/",              label: "Documents",     icon: I.doc   },
+  { id: "templates",     path: "/templates",     label: "Templates",     icon: I.tmpl  },
+  { id: "contacts",      path: "/contacts",      label: "Contacts",      icon: I.user  },
+  { id: "reports",       path: "/reports",       label: "Reports",       icon: I.chart },
+  { id: "notifications", path: "/notifications", label: "Notifications", icon: I.bell  },
+  { id: "settings",      path: "/settings",      label: "Settings",      icon: I.lock  },
 ];
 
 const SIDEBAR_WIDTH = 240;
@@ -43,10 +45,11 @@ export function AppShell({ children }) {
   };
 
   const activeId =
-    location.pathname.startsWith("/templates") ? "templates" :
-    location.pathname.startsWith("/contacts")  ? "contacts"  :
-    location.pathname.startsWith("/reports")   ? "reports"   :
-    location.pathname === "/settings"          ? "settings"  :
+    location.pathname.startsWith("/templates")     ? "templates"     :
+    location.pathname.startsWith("/contacts")      ? "contacts"      :
+    location.pathname.startsWith("/reports")       ? "reports"       :
+    location.pathname.startsWith("/notifications") ? "notifications" :
+    location.pathname === "/settings"              ? "settings"      :
     "documents";
 
   return (
@@ -140,8 +143,9 @@ export function AppShell({ children }) {
           </button>
         </div>
 
-        {/* Right side: account menu */}
+        {/* Right side: notifications bell + account menu */}
         <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4 }}>
+          <NotificationBell />
           <button
             type="button"
             onClick={() => setMenuOpen(o => !o)}
