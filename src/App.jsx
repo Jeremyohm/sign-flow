@@ -6,7 +6,7 @@ import { useAuth } from "./lib/AuthContext";
 import * as db from "./lib/db";
 import {
   Landing, Dashboard, Templates, NewEnvelope, Detail, Prepare, Sign,
-  Contacts, ContactDetail, Reports, Notifications,
+  Contacts, ContactDetail, Reports, Notifications, Pricing,
   Login, Signup, ForgotPassword, ResetPassword, Settings, TemplateNew,
 } from "./pages";
 import { AppShell } from "./components/app";
@@ -212,6 +212,7 @@ export default function App() {
         <Route path="/signup" element={user ? <Navigate to="/" replace /> : <Signup />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/pricing" element={<Pricing />} />
         <Route path="/sign/:id" element={
           <Sign envelopes={envelopes} notify={notify} setEnvelopes={setEnvelopes} />
         } />

@@ -283,8 +283,7 @@ export function Landing() {
             <span className="lp-nav-wordmark">Sign Flow</span>
           </a>
           <nav className="lp-nav-links">
-            {/* TODO: /pricing page */}
-            <a href="#" className="lp-nav-link">Pricing</a>
+            <a href="/pricing" className="lp-nav-link">Pricing</a>
             <a href="/login" className="lp-nav-link">Sign in</a>
             <a href="/signup" className="lp-btn-primary lp-btn-small">Start free</a>
           </nav>
@@ -392,8 +391,7 @@ export function Landing() {
               Most e-signature tools charge per user, per envelope, per add-on. Sign Flow doesn't.
               One flat plan covers your whole team. There's a free tier for individuals, too.
             </p>
-            {/* TODO: /pricing page does not exist yet */}
-            <a href="#" className="lp-link">See pricing <span className="lp-link-arrow" aria-hidden="true">→</span></a>
+            <a href="/pricing" className="lp-link">See pricing <span className="lp-link-arrow" aria-hidden="true">→</span></a>
           </div>
         </RevealOnScroll>
       </section>
@@ -442,9 +440,9 @@ export function Landing() {
               </div>
               <div className="lp-footer-copy">© 2026 Sign Flow. All rights reserved.</div>
             </div>
-            {/* TODO: /pricing, /terms, /privacy, /security, /contact pages don't exist yet */}
+            {/* TODO: /terms, /privacy, /security, /contact pages don't exist yet */}
             <nav className="lp-footer-links">
-              <a href="#">Pricing</a>
+              <a href="/pricing">Pricing</a>
               <a href="#">Terms</a>
               <a href="#">Privacy</a>
               <a href="#">Security</a>

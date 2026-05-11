@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { useDocTitle } from '../utils';
 import { LogoMark } from '../components/ui';
@@ -411,6 +411,13 @@ export function Signup() {
 
   const { signUp } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const intent = searchParams.get("intent");
+  // Where to land after a successful signup. If the user came in via the
+  // pricing page with intent=pro|business, route them to the billing tab with
+  // the auto-upgrade action so Stripe Checkout fires automatically.
+  const postSignupTarget = (intent === "pro" || intent === "business")
+    ? `/settings?tab=billing&action=upgrade-${intent}` : "/";
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -444,8 +451,10 @@ export function Signup() {
 
       // If a session came back immediately, email confirmation is OFF in Supabase —
       // user is fully authenticated and can go straight to the app.
+      // postSignupTarget honors any ?intent=pro|business from the pricing page so
+      // Checkout auto-fires once they land on the billing tab.
       if (data?.session) {
-        navigate('/');
+        navigate(postSignupTarget);
         return;
       }
 

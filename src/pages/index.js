@@ -11,6 +11,7 @@ export { Notifications } from "./Notifications";
 export { Contacts } from "./Contacts";
 export { ContactDetail } from "./ContactDetail";
 export { Reports } from "./Reports";
+export { Pricing } from "./Pricing";
 export { Login } from "./Login";
 export { Signup } from "./Signup";
 export { ForgotPassword } from "./ForgotPassword";
