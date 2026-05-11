@@ -290,6 +290,16 @@ export async function hideContact(contactId) {
   return updateContact(contactId, { is_hidden: true });
 }
 
+// ── Reports ──
+
+export async function fetchReports(rangeDays) {
+  const { data, error } = await supabase.rpc("get_reports_for_user", {
+    p_range_days: rangeDays ?? null,
+  });
+  if (error) throw error;
+  return data;
+}
+
 // ── Emails ──
 
 export async function fetchEmails(userId) {

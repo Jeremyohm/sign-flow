@@ -6,7 +6,7 @@ import { useAuth } from "./lib/AuthContext";
 import * as db from "./lib/db";
 import {
   Landing, Dashboard, Templates, NewEnvelope, Detail, Prepare, Sign,
-  Contacts, ContactDetail,
+  Contacts, ContactDetail, Reports,
   Login, Signup, ForgotPassword, ResetPassword, Settings, TemplateNew,
 } from "./pages";
 import { AppShell } from "./components/app";
@@ -241,6 +241,9 @@ export default function App() {
               <AppShell><ContactDetail notify={notify} /></AppShell>
             } />
             <Route path="/emails" element={<Navigate to="/contacts" replace />} />
+            <Route path="/reports" element={
+              <AppShell><Reports notify={notify} /></AppShell>
+            } />
             <Route path="/settings" element={
               <AppShell><Settings /></AppShell>
             } />
