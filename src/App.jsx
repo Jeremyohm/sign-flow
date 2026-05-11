@@ -190,7 +190,7 @@ export default function App() {
   return (
     <ThemeCtx.Provider value={{ dark, toggle, T }}>
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: F.body, color: T.text, transition: "background 0.3s, color 0.3s" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&family=Montserrat:wght@400;500;600&family=Caveat:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&family=Montserrat:wght@400;500;600&family=Caveat:wght@400;500;600;700&family=Allura&family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
       {/* Toast */}
       {notif && <div style={{ position: "fixed", top: 16, right: 16, zIndex: 999,
         background: notif.type === "success" ? T.successSoft : T.warningSoft,
