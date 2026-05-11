@@ -22,7 +22,7 @@ const FONT_SANS  = "'Inter', system-ui, sans-serif";
 const NAV_ITEMS = [
   { id: "documents", path: "/",          label: "Documents", icon: I.doc  },
   { id: "templates", path: "/templates", label: "Templates", icon: I.tmpl },
-  { id: "emails",    path: "/emails",    label: "Emails",    icon: I.mail },
+  { id: "contacts",  path: "/contacts",  label: "Contacts",  icon: I.user },
   { id: "settings",  path: "/settings",  label: "Settings",  icon: I.lock },
 ];
 
@@ -42,9 +42,9 @@ export function AppShell({ children }) {
   };
 
   const activeId =
-    location.pathname === "/templates" ? "templates" :
-    location.pathname === "/emails"    ? "emails"    :
-    location.pathname === "/settings"  ? "settings"  :
+    location.pathname.startsWith("/templates") ? "templates" :
+    location.pathname.startsWith("/contacts")  ? "contacts"  :
+    location.pathname === "/settings"          ? "settings"  :
     "documents";
 
   return (

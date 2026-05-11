@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useDocTitle } from "../utils";
 import { TemplatePickerModal } from "../components/TemplatePickerModal";
+import * as db from "../lib/db";
 
 const C = {
   paper:       "#FAFAF7",
@@ -77,6 +78,7 @@ export function NewEnvelope({ templates = [], onCreate }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const preselectedTemplateId = searchParams.get("template");
+  const preselectedContactId = searchParams.get("contact");
 
   // ── State ──
   const [step, setStep] = useState(0);
@@ -98,6 +100,26 @@ export function NewEnvelope({ templates = [], onCreate }) {
     if (t) applyTemplate(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectedTemplateId, templates]);
+
+  // If ?contact=<id> in the URL, prefill recipient row 1 with that contact.
+  useEffect(() => {
+    if (!preselectedContactId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const c = await db.fetchContactDetail(preselectedContactId);
+        if (cancelled || !c) return;
+        const displayName = c.display_name || c.derived_name || "";
+        setRecipients(prev => {
+          const first = prev[0] || { id: cryptoId(), recipient_type: "signer" };
+          return [{ ...first, name: displayName, email: c.email }, ...prev.slice(1)];
+        });
+      } catch (err) {
+        console.warn("Failed to prefill contact:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [preselectedContactId]);
 
   function applyTemplate(t) {
     setSelTmpl(t);

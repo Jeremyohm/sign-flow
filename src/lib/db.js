@@ -264,6 +264,32 @@ export async function copyPdfForTemplate(sourcePath, userId) {
   return targetPath;
 }
 
+// ── Contacts ──
+
+export async function fetchContacts() {
+  const { data, error } = await supabase.rpc("get_contacts_for_user");
+  if (error) throw error;
+  return data || [];
+}
+
+export async function fetchContactDetail(contactId) {
+  const { data, error } = await supabase.rpc("get_contact_detail", { p_contact_id: contactId });
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
+export async function updateContact(contactId, patch) {
+  const { data, error } = await supabase.from("contacts")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", contactId).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function hideContact(contactId) {
+  return updateContact(contactId, { is_hidden: true });
+}
+
 // ── Emails ──
 
 export async function fetchEmails(userId) {

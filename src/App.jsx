@@ -5,7 +5,8 @@ import { signingUrl, usePersistedState } from "./utils";
 import { useAuth } from "./lib/AuthContext";
 import * as db from "./lib/db";
 import {
-  Landing, Dashboard, Templates, NewEnvelope, Detail, Prepare, Sign, Notifications,
+  Landing, Dashboard, Templates, NewEnvelope, Detail, Prepare, Sign,
+  Contacts, ContactDetail,
   Login, Signup, ForgotPassword, ResetPassword, Settings, TemplateNew,
 } from "./pages";
 import { AppShell } from "./components/app";
@@ -233,9 +234,13 @@ export default function App() {
             <Route path="/templates/:id/edit" element={
               <TemplateEditor mode="edit" templates={templates} setTemplates={setTemplates} notify={notify} />
             } />
-            <Route path="/emails" element={
-              <AppShell><Notifications emails={emails} /></AppShell>
+            <Route path="/contacts" element={
+              <AppShell><Contacts notify={notify} /></AppShell>
             } />
+            <Route path="/contacts/:contactId" element={
+              <AppShell><ContactDetail notify={notify} /></AppShell>
+            } />
+            <Route path="/emails" element={<Navigate to="/contacts" replace />} />
             <Route path="/settings" element={
               <AppShell><Settings /></AppShell>
             } />
