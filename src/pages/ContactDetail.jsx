@@ -61,14 +61,17 @@ export function ContactDetail({ notify }) {
     return () => { cancelled = true; };
   }, [contactId]);
 
-  const displayName = contact?.display_name || contact?.derived_name || contact?.email || "";
+  const displayName = contact?.display_name || (contact?.email ? contact.email.split("@")[0] : "") || contact?.email || "";
   const envelopes = contact?.envelopes || [];
   const completed = envelopes.filter(e => e.envelope_status === "completed" || e.signer_status === "signed").length;
-  const pending = envelopes.filter(e => e.envelope_status !== "completed" && e.signer_status !== "signed"
-    && e.envelope_status !== "voided" && e.envelope_status !== "expired").length;
-  const lastActivity = envelopes[0]?.signed_at || envelopes[0]?.created_at || null;
+  const pending = envelopes.filter(e => ["sent", "pending", "in_progress"].includes(e.envelope_status)
+    || e.signer_status === "pending").length;
+  const lastActivity = envelopes.reduce((acc, e) => {
+    const ts = e.envelope_updated_at || e.envelope_created_at;
+    return !acc || (ts && ts > acc) ? ts : acc;
+  }, null);
 
-  const beginEdit = () => { setDraftName(contact?.display_name || contact?.derived_name || ""); setEditing(true); };
+  const beginEdit = () => { setDraftName(contact?.display_name || ""); setEditing(true); };
   const cancelEdit = () => { setEditing(false); setDraftName(""); };
   const saveEdit = async () => {
     if (saving) return;
@@ -185,7 +188,7 @@ function StatTile({ label, value, small }) {
 
 function EnvelopeRow({ env, isLast }) {
   const dotColor = statusColor(env.envelope_status, env.signer_status);
-  const date = env.signed_at || env.created_at;
+  const date = env.envelope_updated_at || env.envelope_created_at;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
       borderBottom: isLast ? "none" : `1px solid ${C.border}` }}>

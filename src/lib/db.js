@@ -273,9 +273,38 @@ export async function fetchContacts() {
 }
 
 export async function fetchContactDetail(contactId) {
-  const { data, error } = await supabase.rpc("get_contact_detail", { p_contact_id: contactId });
+  // RPC now returns one row per envelope, with contact metadata duplicated
+  // on every row. Zero envelopes → zero rows; fall back to a direct contacts
+  // fetch so we can still render the contact's header and an empty list.
+  const { data: rows, error } = await supabase.rpc("get_contact_detail", { p_contact_id: contactId });
   if (error) throw error;
-  return data?.[0] || null;
+  const list = rows || [];
+  if (list.length > 0) {
+    const first = list[0];
+    return {
+      id: first.contact_id,
+      email: first.email,
+      display_name: first.display_name,
+      is_hidden: first.is_hidden,
+      envelopes: list.map(r => ({
+        envelope_id: r.envelope_id,
+        envelope_name: r.envelope_name,
+        envelope_status: r.envelope_status,
+        envelope_created_at: r.envelope_created_at,
+        envelope_updated_at: r.envelope_updated_at,
+        signer_status: r.signer_status,
+      })),
+    };
+  }
+  // Zero envelopes: fetch the contact row directly (RLS gates this anyway).
+  const { data: contact, error: cErr } = await supabase
+    .from("contacts").select("id, email, display_name, is_hidden")
+    .eq("id", contactId).single();
+  if (cErr) {
+    if (cErr.code === "PGRST116") return null;
+    throw cErr;
+  }
+  return { ...contact, envelopes: [] };
 }
 
 export async function updateContact(contactId, patch) {
